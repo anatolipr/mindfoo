@@ -165,8 +165,27 @@
 	}
 
 	function mousedown(id, e) {
+		let previous = selected;
 		selected = id;
-		if (selected) moving = true;
+		moving = true;
+
+		if(e.metaKey && previous && previous !== id) {
+
+			let found  = links.find(link =>
+					link.one === previous &&
+					link.one === selected ||
+					link.two === previous &&
+					link.two === selected
+			)
+			if (!found) {
+				links.push({
+					one: previous,
+					two: selected,
+					direction: 'none'
+				});
+				links=links;
+			}
+		}
 	}
 
 	function mouseup() {
@@ -198,7 +217,8 @@
 				direction: undefined
 			});
 			await tick();
-			resize(id, true)
+			resize(id, true);
+			document.getElementById(`d${id}`).focus()
 		}
 
 		selected = id;
@@ -206,6 +226,7 @@
 	}
 
 	async function keyup(e) {
+		console.log('keyup', e.key)
 		if (selected && e.key == 'Tab') {
 			e.stopPropagation();
 			e.preventDefault();
