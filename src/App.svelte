@@ -226,8 +226,7 @@
 	}
 
 	async function keyup(e) {
-		console.log('keyup', e.key)
-		if (selected && e.key == 'Tab') {
+		if (selected && e.key === 'Tab') {
 			e.stopPropagation();
 			e.preventDefault();
 			add()
@@ -266,7 +265,7 @@
 	</svg>
 
 	{#each Object.entries(nodes) as [id,node]}
-		<div id="d{id}" class="item"
+		<div id="d{id}" class="item" tabindex="0"
 			 contenteditable="true"
 			 bind:innerHTML={node.text}
 
@@ -276,7 +275,7 @@
 			 on:keyup={() => resize(id, true)}
 			 bind:clientWidth={node.width}
 			 bind:clientHeight={node.height}
-			 on:mousedown|preventDefault|stopPropagation={(e) => mousedown(id, e)}
+			 on:mousedown|stopPropagation={(e) => mousedown(id, e)}
 			 class:selected={selected == id}></div>
 	{/each}
 
