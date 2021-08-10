@@ -19,10 +19,10 @@
 	const directions = ['left', 'right', 'both', 'none'];
 
 	function lineClick(i) {
-		let prevSelected = linkSelected;
-		linkSelected = i;
+		let prevSelected = selectedLink;
+		selectedLink = i;
 		selected = '';
-		if (prevSelected !== linkSelected) return
+		if (prevSelected !== selectedLink) return
 		let nextDirection;
 		let currentDirection = directions.indexOf(links[i].direction);
 
@@ -40,7 +40,7 @@
 
 
 
-	onMount ( () => {
+	 onMount ( () => {
 		for(let i=0; i<nodes0.length; i++) {
 			resize(i)
 		}
@@ -62,7 +62,7 @@
 			text: 'Test Lorem Ipsum 3'
 		},
 		{
-			id: 0,
+			id: 10,
 			width: 0,
 			height: 0,
 			x:100,
@@ -118,7 +118,7 @@
 			direction: 'left'
 		},
 		{
-			one: 0,
+			one: 10,
 			two: 1,
 			direction: 'none'
 		},
@@ -129,13 +129,13 @@
 		},
 		{
 			one: 2,
-			two: 0,
+			two: 10,
 			direction: 'right'
 		},
 	]
 
 	let selected = '';
-	let linkSelected = '';
+	let selectedLink = '';
 	let moving = false;
 
 	let scene = {
@@ -183,8 +183,9 @@
 			}
 
 			result.push(
-					{
-						c: makeCurve(c)}
+					{	id: node1.id + '-' + node2.id,
+						c: makeCurve(c)
+					}
 			);
 		}
 		return result;
@@ -193,17 +194,21 @@
 	function selectNode(i, e) {
 		let previous = selected;
 		selected = i;
-		linkSelected = '';
+		selectedLink = '';
 		moving = true;
 
-		if (e.metaKey && previous && previous !== i) {
+		if (e.metaKey && previous !== '' && previous !== i) {
+
 
 			let found  = links.find(link =>
-					link.one === previous &&
-					link.one === selected ||
-					link.two === previous &&
-					link.two === selected
+					(link.one === nodes0[previous].id &&
+					link.two === nodes0[selected].id)
+					||
+					(link.one === nodes0[selected].id &&
+					link.two === nodes0[previous].id)
 			)
+
+
 			if (!found) {
 				links.push({
 					one: nodes0[previous].id,
@@ -220,7 +225,8 @@
 	}
 
 	function mousemove(e) {
-		if(!selected || !moving) return
+		if(selected === '' || !moving) return
+
 		nodes0[selected].x += e.movementX;
 		nodes0[selected].y += e.movementY;
 		lines = makeLines(links)
@@ -259,31 +265,39 @@
 	}
 
 	async function keydown(e) {
-// console.log(e)
+
 		if (selected && e.key === 'Tab') {
 			e.stopPropagation();
 			e.preventDefault();
-			await add()
+			await add();
 		} else if (selected && e.key === 'Backspace' && e.metaKey) {
+			nodes0.splice(selected,1);
 
 			let i = links.length;
 			while(i--) {
-				if (links[i].one === selected || links[i].two === selected) {
+				if (links[i].one === nodes[selected].id
+						|| links[i].two === nodes[selected].id) {
 					links.splice(i, 1);
 				}
 			}
 
-			//delete nodes[selected];
+
+
+		} else if (selectedLink && e.key === 'Backspace') {
+
+			links.splice(selectedLink, 1);
+			selectedLink = ''
+			lines = makeLines();
 		}
 
 	}
 
 	function bodyMouseDown() {
 		selected = ''
-		linkSelected = ''
+		selectedLink = ''
 	}
 
-	$: lines = makeLines(links);
+$: lines = makeLines(links)
 
 
 </script>
@@ -297,9 +311,9 @@
 			<path d="M 0 0 L 15 5 L 0 10 z" />
 		</marker>
 
-		{#each lines as line, i}
+		{#each lines as line, i (line.id)}
 			<path
-					class:lineSelected={i === linkSelected}
+					class:lineSelected={i === selectedLink}
 					on:mousedown|stopPropagation={() => lineClick(i)} class=line fill="none" stroke=black stroke-width=2 d={line.c}
 					marker-end="{links[i].direction === 'right' || links[i].direction === 'both' ? 'url(#arrow)' : ''}"
 					marker-start="{links[i].direction === 'left' || links[i].direction === 'both' ? 'url(#arrow)' : ''}"
@@ -307,14 +321,15 @@
 		{/each}
 	</svg>
 
-	{#each nodes0 as node, i}
-		<div id="d{node.id}" class="item" tabindex="0"
+	{#each nodes0 as node, i (node.id)}
+		<div id="d{node.id}" class="item" tabindex="-1"
 			 contenteditable="true"
+
 			 bind:innerHTML={node.text}
 
 			 style="left: {node.x - node.width/2}px;
 							top: {node.y - node.height/2}px;
-							border-radius: 8px;"
+							border-radius: 8px; user-select:none"
 			 on:keyup={() => resize(i, true)}
 			 bind:clientWidth={node.width}
 			 bind:clientHeight={node.height}
@@ -325,7 +340,7 @@
 </div>
 
 
-<svelte:window on:mousedown="{() => bodyMouseDown()}"
+<svelte:window on:mousedown="{bodyMouseDown}"
 			   on:mouseup={mouseup}
 			   on:mousemove={mousemove}
 			   on:wheel|preventDefault|stopPropagation|capture|nonpassive={wheel}/>
