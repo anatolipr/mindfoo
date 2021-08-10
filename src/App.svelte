@@ -283,8 +283,8 @@
 
 
 
-		} else if (selectedLink && e.key === 'Backspace') {
-
+		} else if (selectedLink !== '' && e.key === 'Backspace') {
+			console.log('delete line ', selectedLink)
 			links.splice(selectedLink, 1);
 			selectedLink = ''
 			lines = makeLines();
