@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import intersect from "path-intersection"
 	import {makeRect, makeCurve, deCasteljau} from "./geo.js"
 	import { onMount } from 'svelte';
