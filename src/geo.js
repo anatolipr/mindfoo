@@ -15,7 +15,7 @@ export function deCasteljau(givenPoints, t){
       let a	=	points[i];
       let b	=	points[i+1];
       let newCoord = nc(a, b, t);
-      if (points.length == 2) {
+      if (points.length === 2) {
         return [givenPoints[0], firstHandle, a, newCoord];
       }
       midpoints.push(newCoord);
@@ -26,6 +26,12 @@ export function deCasteljau(givenPoints, t){
 }
 
 export function makeCurve(cb) {
+  // if (cb[0][0] === cb[1][0]
+  //  && cb[2][0] === cb[3][0]
+  // ) {
+  //   return `M ${cb[0][0]} ${cb[0][1]}
+	// 		        L ${cb[3][0]} ${cb[3][1]}`
+  // }
   return `M ${cb[0][0]} ${cb[0][1]} 
 			        C ${cb[1][0]} ${cb[1][1]}
 								${cb[2][0]} ${cb[2][1]} 
