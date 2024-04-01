@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "avos": "1.0.15",
-    "uuid": "^9.0.1",
+    "nanoid": "^5.0.6",
     "path-intersection": "3.1.0",
     "svelte-color-picker": "^1.0.7"
   },
