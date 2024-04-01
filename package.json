@@ -12,7 +12,7 @@
   "dependencies": {
     "avos": "1.0.15",
     "uuid": "^9.0.1",
-    "path-intersection": "^2.2.1",
+    "path-intersection": "3.1.0",
     "svelte-color-picker": "^1.0.7"
   },
   "devDependencies": {

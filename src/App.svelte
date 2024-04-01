@@ -1,11 +1,13 @@
-<script>
+<script lang="ts">
 	import intersect from "path-intersection"
-	import {deCasteljau, makeCurve, makeRect} from "./geo.js"
+	import {deCasteljau, makeCurve, makeRect} from "./geo"
 	import {onMount, tick} from 'svelte';
 	import {rgbAsHex, uuidv4} from './util'
 
+	import { type Node } from './data/types'
 
-	import {HsvPicker} from 'svelte-color-picker';
+
+	import { HsvPicker } from 'svelte-color-picker';
 
 	let mouseX = 0;
 	let mouseY = 0;
@@ -65,7 +67,8 @@
 		}
 	})
 
-	let nodes0 = [
+
+	let nodes0: Node[] = [
 		{
 			id: 880,
 			width: 0,

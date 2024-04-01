@@ -25,7 +25,7 @@ export function deCasteljau(givenPoints, t){
   }
 }
 
-export function makeCurve(cb) {
+export function makeCurve(cb): string {
   // if (cb[0][0] === cb[1][0]
   //  && cb[2][0] === cb[3][0]
   // ) {
@@ -38,13 +38,10 @@ export function makeCurve(cb) {
 								${cb[3][0]} ${cb[3][1]}`
 }
 
-export function makeRect(width, height, cx, cy, r) {
+export function makeRect(width: number, height: number, cx: number, cy: number, r: number): string {
   let halfX = width/2;
   let halfY = height/2;
-  if (!r) {
-    return `M ${cx - halfX} ${cy - halfY} 
-				 h ${width} v ${height} h -${width} v -${height} `
-  } else if (r > 0) {
+  if (r > 0) {
     return `M ${cx - halfX + r} ${cy - halfY} 
 					h${width - r*2} 
 					a${r},${r} 0 0 1 ${r},${r} 
@@ -54,5 +51,8 @@ export function makeRect(width, height, cx, cy, r) {
 					a${r},${r} 0 0 1 -${r},-${r} 
 					v-${height -r*2} 
 					a${r},${r} 0 0 1 ${r},-${r}`
+  } else {
+    return `M ${cx - halfX} ${cy - halfY} 
+				 h ${width} v ${height} h -${width} v -${height} `
   }
 }
