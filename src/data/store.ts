@@ -14,11 +14,12 @@ export const $lines: Foo<Line[]> = new Foo(<Line[]>[]);
 
 export const $mouse: Foo<Coordinates> = new Foo({x:0, y:0})
 export const $scene: Foo<Coordinates> = new Foo({x:0, y:0})
+export const $moving: Foo<boolean> = new Foo(false);
 
 export const $selection: Foo<number[]> = new Foo(<number[]>[]);
 export const $previousSelection: Foo<number[]> = new Foo(<number[]>[]);
-export const selectedLink: Foo<optionalSelectedIndex> = new Foo(-1);
-//here
+export const $selectedLink: Foo<optionalSelectedIndex> = new Foo(-1);
+
 
 export const $nodeMap: Foo<{[key: NodeId]: Node}> = new Foo({});
 
@@ -159,3 +160,15 @@ function makeNodesMap(nodes0: Node[]): void {
         
     $nodeMap.set(rv)
 }
+
+
+//interaction
+
+function wheel(e: WheelEvent) {
+    $scene.update(scene => {
+        scene.x -= e.deltaX;
+        scene.y -= e.deltaY;
+        return scene;
+    })
+}
+//here
