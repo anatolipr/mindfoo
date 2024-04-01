@@ -3,6 +3,8 @@
 	import {deCasteljau, makeCurve, makeRect} from "./geo"
 	import {onMount, tick} from 'svelte';
 	import {rgbAsHex} from './util.js'
+
+	import { saveFile, readFile } from 'avos/src/util'
 	
 
 	import type { Node, Link, Line, Direction, NodeId } from './data/types'
@@ -465,6 +467,42 @@
 	}
 
 
+	function doExport() {
+		const fname = prompt("file name");
+		if (name === null) {
+			return
+		}
+		saveFile(JSON.stringify({
+			nodes: nodes0, links
+		}), (fname || 'untitled') + '.arrows')
+	}
+
+	async function doImport() {
+		const content: string = await readFile();
+		if (content) {
+
+			const parsed: {nodes: Node[], links: Link[]} = JSON.parse(content);
+			if ( ! parsed.hasOwnProperty('links') ) {
+				alert('invalid format: 1')
+				return;
+			}
+
+			if (! parsed.hasOwnProperty('nodes')) {
+				alert('invalid format: 2')
+				return;
+			}
+
+			nodes0 = [...parsed.nodes];
+			links = [...parsed.links];
+			nodes = makeNodesMap();
+			selection = [];
+			
+			//?
+			lines = makeLines(links)
+			
+		}
+	}
+
 	function move(cProp: string, delta: number): void {
 		selection.forEach(i => nodes0[i][cProp] += delta);
 		nodes0 = nodes0
@@ -692,6 +730,8 @@ let editing: boolean = false
 	{#if menu === 'color'}
 		<HsvPicker on:colorChange={colorChange} startColor="#ffffff"/>
 	{/if}
+	<button on:click="{doExport}">export</button>
+	<button on:click="{doImport}">import</button>
 </div>
 
 <svelte:window on:mousedown="{bodyMouseDown}"
@@ -708,6 +748,8 @@ let editing: boolean = false
 		top: 10px;
 		right: 10px;
 		user-select: none;
+		display: flex;
+		flex-direction: column;
 	}
 	.selection {
 		position: fixed;
