@@ -7,11 +7,13 @@
 	import { saveFile, readFile } from 'avos/src/util'
 	
 
-	import type { Node, Link, Line, Direction, NodeId } from './data/types'
+	import type { Node, Link, Line, NodeId, optionalSelectedIndex } from './data/types'
 
 
 	import { HsvPicker } from 'svelte-color-picker';
     import { nanoid } from "nanoid";
+    import { directions } from "./data/directions";
+    import { lineCurveFactor } from "./data/consts";
     
 
 	let mouseX = 0;
@@ -32,7 +34,7 @@
 		}
 	}
 
-	const directions: Direction[] = ['left', 'right', 'both', 'none'];
+	
 
 	function rotateArrows(i: number) {
 		let nextDirection;
@@ -210,9 +212,9 @@
 
 	let selection: number[] = [];
 	let previousSelection: number[] = [];
-	type unselected = -1;
 	
-	let selectedLink: number | unselected = -1;
+	
+	let selectedLink: optionalSelectedIndex;
 	let moving: boolean = false;
 
 	let scene = {
@@ -224,7 +226,7 @@
 		scene.y -= e.deltaY;
 	}
 
-	let lineCurveFactor = 0.3
+	
 	function makeLines(links: Link[]): Line[] {
 
 		let result: Line[] = [];

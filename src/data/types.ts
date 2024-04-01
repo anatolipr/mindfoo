@@ -14,6 +14,9 @@ export type Node = {
 
 export type Direction = 'none' | 'both' | 'left' | 'right' | undefined;
 
+export type unselected = -1;
+export type optionalSelectedIndex = number | unselected;
+
 /**
  * connection between two notes
  */
@@ -44,4 +47,9 @@ export type Line = {
      * curve
      */
     c: string;
+}
+
+export type Coordinates = {
+    x: number;
+    y: number;
 }

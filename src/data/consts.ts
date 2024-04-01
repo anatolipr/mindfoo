@@ -1,0 +1,1 @@
+export const lineCurveFactor = 0.3
