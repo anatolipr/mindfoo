@@ -1,6 +1,12 @@
 
 import  Foo  from 'avos/src/foo-store/foo';
 
-import type { Node } from './types';
+import type { Line, Link, Node, NodeId } from './types';
 
-export const $nodes0: Foo<Node[]> = new Foo(<Node[]>[]);
+export const $nodeStore: Foo<Node[]> = new Foo(<Node[]>[]);
+
+export const $linkStore: Foo<Link[]> = new Foo(<Link[]>[]);
+
+export const $lineStore: Foo<Line[]> = new Foo(<Line[]>[]);
+
+export const $nodeMap: Foo<{[key: NodeId]: Node}> = new Foo({});
