@@ -60,8 +60,6 @@
 		rotateArrows(i);
 	}
 
-
-
 	 onMount ( () => {
 		for(let i=0; i<nodes0.length; i++) {
 			resize(i)
@@ -371,8 +369,6 @@
 		})
 
 	}
-
-
 
 	function equalSpacing(cProp: string, diProp: string): void {
 		if (selection.length < 3) return
