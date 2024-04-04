@@ -133,6 +133,7 @@
 	{/if}
 	<button on:click="{doExport}">export</button>
 	<button on:click="{doImport}">import</button>
+	<button on:click="{() => alert('MindFoo by Anatoli Radulov')}">about</button>
 </div>
 
 <svelte:window on:mousedown="{bodyMouseDown}"
