@@ -34,18 +34,18 @@ export const $menu: Foo<string> = new Foo('');
 
 // ---
 
-// export function init() {
-//     const nodes0 = $nodes.get();
-//     for(let i=0; i<nodes0.length; i++) {
-//         resize(i)
-//     }
-//     makeLines();
+export function init() {
+    const nodes0 = $nodes.get();
+    for(let i=0; i<nodes0.length; i++) {
+        resize(i)
+    }
+    makeLines();
 
-//     document.addEventListener('keydown', keydown);
-//     return () => {
-//         document.removeEventListener('keydown', keydown)
-//     }
-// }
+    document.addEventListener('keydown', keydown);
+    return () => {
+        document.removeEventListener('keydown', keydown)
+    }
+}
 
 
 
@@ -81,7 +81,7 @@ export function lineClick(i: number) {
     rotateArrows(i);
 }
 
-async function add() {
+export async function add() {
 
 
     let id = nanoid();
@@ -142,7 +142,7 @@ async function add() {
     
 }
 
-function resize(i: number, doLines: boolean = false) {
+export function resize(i: number, doLines: boolean = false) {
 
     const nodes0 = $nodes.get();
 
@@ -217,7 +217,7 @@ function makeNodesMap(nodes0: Node[]): void {
 
 //interaction
 
-function wheel(e: WheelEvent) {
+export function wheel(e: WheelEvent) {
     $scene.update(scene => {
         scene.x -= e.deltaX;
         scene.y -= e.deltaY;
@@ -225,15 +225,14 @@ function wheel(e: WheelEvent) {
     })
 }
 
-function selectNode(i: number, e: MouseEvent) {
-
+export function selectNode(i: number, e: MouseEvent) {
     
-    $previousSelection.set($selection.get());
+    $previousSelection.set([...$selection.get()]);
     let previousSelection = $previousSelection.get()
 
     let selected = i;
 
-    if ($selection.get().indexOf(i) === -1) {
+    if ($selection.get().indexOf(i) === -1 && !e.shiftKey) {
         $selection.set([i]);
     }
 
@@ -243,17 +242,27 @@ function selectNode(i: number, e: MouseEvent) {
     $moving.set(true);
 
     if (e.shiftKey) {
-        previousSelection.forEach((i) => {
-            if (selection.indexOf(i) === -1) {
-                selection.push(i)
-            }
+        //todo
+        $selection.update(selection => {
+
+            previousSelection.forEach((i) => {
+                if (selection.indexOf(i) === -1) {
+                    selection.push(i)
+                }
+            })
+
+            console.log(previousSelection, selection, i)
+
+            return selection;
         })
+        
+        
 
     } else if ((e.metaKey || e.button === 2)
             && selection.length === 1
             && previousSelection.indexOf(i) === -1) {
 
-                const nodes0 = $nodes.get();
+            const nodes0 = $nodes.get();
 
             previousSelection.forEach((previous) => {
 
@@ -268,6 +277,7 @@ function selectNode(i: number, e: MouseEvent) {
 
 
             if (!found) {
+                
                 $links.update(links => {
                     links.push({
                         one: nodes0[previous].id,
@@ -276,15 +286,17 @@ function selectNode(i: number, e: MouseEvent) {
                     });
                     return links;
                 })
+
+                makeLines()
             }
 
         })
 
-
     }
 }
 
-function mouseup(e: MouseEvent) {
+
+export function mouseup(e: MouseEvent) {
     if ($selecting.get()) {
         $previousSelection.set($selection.get());
         
@@ -330,7 +342,7 @@ function mouseup(e: MouseEvent) {
 
 }
 
-function mousemove(e: MouseEvent) {
+export function mousemove(e: MouseEvent) {
 
     $mouse.set({
         x: e.clientX,
