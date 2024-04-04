@@ -8,6 +8,8 @@ import { lineCurveFactor } from './consts';
 import intersect from "path-intersection"
 import { deCasteljau, makeCurve, makeRect } from '../geo';
 import { directions } from './directions';
+import { readFile, saveFile } from 'avos/src/util';
+import { rgbAsHex } from '../util';
 
 export const $nodes: Foo<Node[]> = new Foo(<Node[]>[]);
 export const $links: Foo<Link[]> = new Foo(<Link[]>[]);
@@ -18,6 +20,7 @@ export const $scene: Foo<Coordinates> = new Foo({x:0, y:0})
 export const $selectionStart: Foo<Coordinates> = new Foo({x: 0, y: 0});
 
 export const $moving: Foo<boolean> = new Foo(false);
+export const $editing: Foo<boolean> = new Foo(false);
 
 export const $selection: Foo<number[]> = new Foo(<number[]>[]);
 export const $previousSelection: Foo<number[]> = new Foo(<number[]>[]);
@@ -27,6 +30,7 @@ export const $selectedLink: Foo<optionalSelectedIndex> = new Foo(-1);
 export const $nodeMap: Foo<{[key: NodeId]: Node}> = new Foo({});
 
 export const $selecting: Foo<boolean> = new Foo(false);
+export const $menu: Foo<string> = new Foo('');
 
 // ---
 
@@ -125,7 +129,7 @@ async function add() {
             
         }
 
-        $selection.set([nodes0.length-1])
+        $selection.set([nodes0.length - 1])
 
         return nodes0
     })
@@ -133,7 +137,7 @@ async function add() {
 
     await tick();
 
-    resize($nodes.get().length-1, true);
+    resize($nodes.get().length - 1, true);
     document.getElementById(`d${id}`)?.focus()
     
 }
@@ -201,6 +205,7 @@ function makeLines(): void {
 }
 
 function makeNodesMap(nodes0: Node[]): void {
+
     const rv: {[key: string | number]: Node} = {};
 
     for (let i = 0; i < nodes0.length; ++i) {
@@ -349,4 +354,331 @@ function mousemove(e: MouseEvent) {
     makeLines()
 
 }
+
+export function equalSpacing(cProp: string, diProp: string): void {
+
+    if ($selection.get().length < 3) return;
+
+    $nodes.update(nodes0 => {
+
+        $selection.update(selection => {
+            selection.sort((one, two) => nodes0[one][cProp] < nodes0[two][cProp] ? -1 : 1)
+            return selection;
+        });
+
+        let selection = $selection.get();
+        let first = selection[0];
+        let last = selection[selection.length - 1]
+
+        let min = nodes0[first][cProp] - nodes0[first][diProp] / 2;
+        let max = nodes0[last][cProp] + nodes0[last][diProp] / 2;
+        let totalWidth = selection.map(i => nodes0[i][diProp])
+                .reduce((one, two) => one + two, 0);
+
+        let space = ((max - min) - totalWidth) / (selection.length - 1);
+
+        let distance = min
+        for (let i = 0; i < selection.length; i++) {
+            let s = selection[i]
+            nodes0[s][cProp] = distance + nodes0[s][diProp] / 2;
+            distance = distance + nodes0[s][diProp] + space;
+        }
+        return nodes0;
+    })
+
+    makeLines()
+    
+}
+
+export function mirror(cProp: string, diProp: string): void {
+
+    if ($selection.get().length < 2) return;
+
+    $nodes.update(nodes0 => {
+
+        $selection.update(selection => {
+            selection.sort((one, two) => nodes0[one][cProp] < nodes0[two][cProp] ? -1 : 1)
+            return selection;
+        });
+
+        let selection = $selection.get();
+        let first = selection[0];
+        let last = selection[selection.length - 1]
+
+        let min = nodes0[first][cProp] - nodes0[first][diProp] / 2;
+        let max = nodes0[last][cProp] + nodes0[last][diProp] / 2;
+
+        selection.forEach((i) => {
+            let nodeRight = nodes0[i][cProp] + nodes0[i][diProp] / 2;
+            let distanceRight = max - nodeRight;
+            nodes0[i][cProp] = min + distanceRight + nodes0[i][diProp] / 2;
+        })
+        
+        return nodes0;
+    });
+    makeLines()
+    
+}
+
+function alignFirst(cProp: string, diProp: string): void {
+
+    let selection = $selection.get();
+    if (selection.length < 2) return;
+
+    $nodes.update(nodes0 => {
+
+        let min: number;
+
+        selection.forEach((i) => {
+            if (min === undefined || nodes0[i][cProp] - nodes0[i][diProp] / 2 < min) {
+                min = nodes0[i][cProp] - nodes0[i][diProp] / 2
+            }
+        })
+    
+        selection.forEach((i) => {
+            nodes0[i][cProp] = min + nodes0[i][diProp] / 2
+        })
+
+        return nodes0;
+    })
+
+    makeLines();
+
+}
+
+export function alignLast(cProp: string, diProp: string): void {
+
+    let selection = $selection.get();
+    if (selection.length < 2) return;
+
+    $nodes.update(nodes0 => {
+
+        let max: number;
+        selection.forEach((i) => {
+            if (max === undefined || nodes0[i][cProp] + nodes0[i][diProp] / 2 > max) {
+                max = nodes0[i][cProp] + nodes0[i][diProp] / 2
+            }
+        })
+    
+        selection.forEach((i) => {
+            nodes0[i][cProp] = max - nodes0[i][diProp] / 2
+        })
+
+        return nodes0;
+    })
+
+    makeLines();
+    
+}
+
+export function center(cProp: string, diProp: string) {
+
+    if ($selection.get().length < 2) return;
+
+    $nodes.update(nodes0 => {
+
+        $selection.update(selection => {
+            selection.sort((one, two) => nodes0[one][cProp] < nodes0[two][cProp] ? -1 : 1)
+            return selection;
+        })
+        
+        let selection = $selection.get();
+        let first = selection[0];
+        let last = selection[selection.length - 1]
+
+        let min = nodes0[first][cProp] - nodes0[first][diProp] / 2;
+        let max = nodes0[last][cProp] + nodes0[last][diProp] / 2;
+
+
+        selection.forEach((i) => {
+            nodes0[i][cProp] = min + (max - min) / 2
+        })
+
+        return nodes0;
+    });
+
+    makeLines()
+}
+
+export function doExport() {
+    const fname = prompt("file name");
+    if (name === null) {
+        return
+    }
+    saveFile(JSON.stringify({
+        nodes: $nodes.get(), links: $links.get()
+    }), (fname || 'untitled') + '.arrows')
+}
+
+export async function doImport() {
+    const content: string = await readFile();
+    if (content) {
+
+        const parsed: {nodes: Node[], links: Link[]} = JSON.parse(content);
+
+        if ( ! parsed.hasOwnProperty('links') ) {
+            alert('invalid format: 1')
+            return;
+        }
+
+        if (! parsed.hasOwnProperty('nodes')) {
+            alert('invalid format: 2')
+            return;
+        }
+        
+        
+        
+        $nodes.set([...parsed.nodes]);
+        $links.set([...parsed.links]);
+
+        makeNodesMap($nodes.get());
+
+        $selection.set([])
+        
+        //?
+        makeLines();
+    }
+}
+
+export function move(cProp: string, delta: number): void {
+
+    $nodes.update(nodes0 => {
+        $selection.get().forEach(i => nodes0[i][cProp] += delta);
+        return nodes0;
+    })
+
+    makeLines();
+}
+
+async function keydown(e: KeyboardEvent): Promise<void> {
+
+    if (e.metaKey && e.code === 'KeyA') {
+        $selection.update(selection => {
+            selection = [...Array($nodes.get().length).keys()].map(x => x++);
+            return selection;
+        })
+        
+        return;
+    }
+
+    if ($selection.get().length !== 0) {
+
+        if (e.key === 'ArrowLeft') {
+            move('x', e.shiftKey ? -10 : -1)
+        } else if (e.key === 'ArrowRight') {
+            move('x', e.shiftKey ? 10 : 1)
+        } else if (e.key === 'ArrowDown') {
+            move('y', e.shiftKey ? 10 : 1)
+        } else if (e.key === 'ArrowUp') {
+            move('y', e.shiftKey ? -10 : -1)
+        } else if (e.key === 'C') {
+            center('y', 'height');
+        } else if (e.key === 'c') {
+            center('x', 'width');
+        } else if (e.code === 'KeyL') {
+            alignFirst('x', 'width');
+        } else if (e.code === 'KeyR') {
+            alignLast('x', 'width');
+        } else if (e.code === 'KeyT') {
+            alignFirst('y', 'height');
+        } else if (e.code === 'KeyB') {
+            alignLast('y', 'height');
+        } else if (e.key === 'D') {
+            equalSpacing('y', 'height');
+        } else if (e.key === 'd') {
+            equalSpacing('x', 'width');
+        } else if (e.key === 'm') {
+            mirror('x', 'width');
+        } else if (e.key === 'M') {
+            mirror('y', 'height');
+        } else if (e.key === 'Tab') {
+
+            e.stopPropagation();
+            e.preventDefault();
+            await add();
+
+        } else if (e.key === 'Backspace' && (e.metaKey || !$editing.get())) {
+
+            let x = $nodes.get().length;
+
+            while(x--) {
+                if ($selection.get().indexOf(x) > -1) {
+                    let selected = x;
+                    let selectedNodeId: NodeId = $nodes.get()[selected].id;
+                    $links.update(links => {
+                        let i = links.length;
+                        while(i--) {
+                            if (links[i].one === selectedNodeId
+                                    || links[i].two === selectedNodeId) {
+                                links.splice(i, 1);
+                            }
+                        }
+
+                        return links;
+                    })
+
+                    
+
+                    $nodes.update(nodes0 => {
+                        nodes0.splice(selected,1);
+                        return nodes0;
+                    })
+                    
+                }
+            }
+            //TODO - only do this if we need to
+            
+            makeLines()
+
+            $selection.set([])
+            $previousSelection.set([])
+        }
+
+    } else if ($selectedLink.get() !== -1) {
+
+        if (e.key === 'Backspace') {
+            lineDelete($selectedLink.get());
+        } else if (e.key === ' ') {
+            rotateArrows($selectedLink.get())
+        }
+
+    }
+
+}
+
+export function lineDelete(i: number): void {
+
+    $links.update(links => {
+                links.splice(i, 1);
+                return links;
+            })
+
+    $selectedLink.set(-1);
+    makeLines();
+}
+
+export function bodyMouseDown(e: MouseEvent) {
+    $moving.set(false);
+    $editing.set(false);
+    $selectedLink.set(-1);
+    $selecting.set(true);
+
+    $selectionStart.set({...$mouse.get()})
+
+    $menu.set('');
+}
+
+export function colorChange(e: CustomEvent) {
+    const selection = $selection.get()
+    if(selection.length === 0) return;
+
+    let c: {r:number, g:number, b:number, a:number} = e.detail;
+    let hex = rgbAsHex([c.r, c.g, c.b, Math.round(c.a*255)]);
+
+    $nodes.update(nodes0 => {
+        selection.forEach(i => nodes0[i].color = hex)
+        return nodes0;
+    })
+}
+
 
