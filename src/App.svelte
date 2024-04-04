@@ -96,7 +96,7 @@
 			 bind:clientHeight={node.height}
 			 on:mousedown|stopPropagation={(e) => selectNode(i, e)}
 			 on:contextmenu|stopPropagation|preventDefault={(e) => selectNode(i, e)}
-			 on:mouseup={()=>$selection = [i]}
+			 
 			 class:selected={$selection.indexOf(i) > -1}>
 			{#if $editing}
 				<div role="none" id="e{node.id}"

@@ -22,7 +22,7 @@ export const $selectionStart: Foo<Coordinates> = new Foo({x: 0, y: 0});
 export const $moving: Foo<boolean> = new Foo(false);
 export const $editing: Foo<boolean> = new Foo(false);
 
-export const $selection: Foo<number[]> = new Foo(<number[]>[]);
+export const $selection: Foo<number[]> = new Foo(<number[]>[], "selection");
 export const $previousSelection: Foo<number[]> = new Foo(<number[]>[]);
 export const $selectedLink: Foo<optionalSelectedIndex> = new Foo(-1);
 
@@ -232,7 +232,7 @@ export function selectNode(i: number, e: MouseEvent) {
 
     let selected = i;
 
-    if ($selection.get().indexOf(i) === -1 && !e.shiftKey) {
+    if ($selection.get().indexOf(i) === -1) {
         $selection.set([i]);
     }
 
@@ -242,7 +242,7 @@ export function selectNode(i: number, e: MouseEvent) {
     $moving.set(true);
 
     if (e.shiftKey) {
-        //todo
+        
         $selection.update(selection => {
 
             previousSelection.forEach((i) => {
@@ -251,12 +251,8 @@ export function selectNode(i: number, e: MouseEvent) {
                 }
             })
 
-            console.log(previousSelection, selection, i)
-
             return selection;
         })
-        
-        
 
     } else if ((e.metaKey || e.button === 2)
             && selection.length === 1
@@ -333,7 +329,6 @@ export function mouseup(e: MouseEvent) {
                 }
             })
         }
-
         $selection.set(selection);
     }
 
