@@ -66,7 +66,7 @@
 		<marker id="arrow" viewBox="0 0 10 10" refX="15" refY="5"
 				markerWidth="4" markerHeight="5"
 				orient="auto-start-reverse">
-			<path d="M 0 0 L 15 5 L 0 10 z" />
+			<path d="M 0 0 L 15 5 L 0 10 z" fill="var(--fg-2)" />
 		</marker>
 
 		{#each $lines as line, i (line.id)}
@@ -87,7 +87,7 @@
 					top: {node.y - node.height/2}px;
 					{node.minHeight > 0 ? `min-height:${node.minHeight}px;`:''}
 					{node.minWidth > 0 ? `min-width:${node.minWidth}px;`:''}
-					background-color: {node.color ? node.color : 'white'}
+					background-color: {node.color ? node.color : 'auto'}
 				   "
 			 on:input={() => resize(i, true)}
 			 bind:clientWidth={node.width}
@@ -160,6 +160,9 @@
 		overflow:visible;
 		position: absolute;
 	}
+	.line {
+		stroke: var(--fg-2);
+	}
 	.line:hover {
 		stroke:red;
 		cursor:pointer;
@@ -171,8 +174,8 @@
 		box-sizing: border-box;
 		padding: 10px;
 		position: absolute;
-		background-color: white;
-		border: 1px solid black;
+		background-color: var(--bg-1);
+		border: 1px solid var(--fg-2);
 		overflow:visible;
 		outline:none;
 		user-select:none;
@@ -180,7 +183,7 @@
 	}
 
 	.selected {
-		border: 1px dashed green;
+		border: 1px dashed;
 	}
 	.lineSelected {
 		stroke: red;
