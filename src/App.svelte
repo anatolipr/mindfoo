@@ -3,6 +3,7 @@
 	import {onMount, tick} from 'svelte';
 
 	import { 
+		$theme as theme,
 		$lines as lines, 
 		$links as links,
 		init, 
@@ -26,7 +27,10 @@
         mousemove,
         mouseup,
         add,
-        wheel
+        wheel,
+
+        toggleTheme
+
 
 	} from './data/store';
 	
@@ -131,6 +135,8 @@
 	{/if}
 	<button on:click="{doExport}">export</button>
 	<button on:click="{doImport}">import</button>
+	<button on:click="{toggleTheme}">{$theme === 'dark' ? 'light' : 'dark'}</button>
+
 	<button on:click="{() => alert('MindFoo by Anatoli Radulov')}">about</button>
 </div>
 

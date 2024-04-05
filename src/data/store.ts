@@ -33,6 +33,15 @@ export const $nodeMap: Foo<{[key: NodeId]: Node}> = new Foo({});
 export const $selecting: Foo<boolean> = new Foo(false);
 export const $menu: Foo<string> = new Foo('');
 
+export const $theme: Foo<string> = new Foo('dark');
+
+$theme.subscribe(theme => 
+   {document.body.classList.toggle('dark', theme === 'dark')}
+)
+export function toggleTheme(): void {
+    $theme.set($theme.get() === 'dark' ? 'light' : 'dark')
+}
+
 // ---
 
 export function init() {
