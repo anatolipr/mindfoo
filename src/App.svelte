@@ -30,12 +30,10 @@
 
 	} from './data/store';
 	
-	
 	import { HsvPicker } from 'svelte-color-picker';
     import type { NodeId } from './data/types';
     import { selectText } from './util';
      
-
 	 onMount ( init )
 
 	 export async function toggleEdit(id: NodeId) {

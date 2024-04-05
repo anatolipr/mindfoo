@@ -1,7 +1,8 @@
 
 import  Foo  from 'avos/src/foo-store/foo';
 
-import type { Line, Link, Coordinates, Node, NodeId, optionalSelectedIndex } from './types';
+import type { Line, Link, Coordinates, 
+    Node, NodeId, optionalSelectedIndex } from './types';
 import { nanoid } from 'nanoid';
 import { tick } from 'svelte';
 import { lineCurveFactor } from './consts';
