@@ -1,7 +1,7 @@
 <script lang="ts">
 	
 	import {onMount, tick} from 'svelte';
-
+	import { getContrastColor } from 'avos/src/color-util'
 	import { 
 		$theme as theme,
 		$lines as lines, 
@@ -91,6 +91,7 @@
 					top: {node.y - node.height/2}px;
 					{node.minHeight > 0 ? `min-height:${node.minHeight}px;`:''}
 					{node.minWidth > 0 ? `min-width:${node.minWidth}px;`:''}
+					color: {node.color ? getContrastColor(node.color) : 'auto'};
 					background-color: {node.color ? node.color : 'auto'}
 				   "
 			 on:input={() => resize(i, true)}
