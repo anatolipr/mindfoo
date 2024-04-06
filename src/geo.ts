@@ -62,21 +62,109 @@ export function makeRect(width: number, height: number, cx: number, cy: number, 
   }
 }
 
-export function makeCircle(radius: number, centerX: number, centerY: number): string {
 
-      // Move to the starting point of the circle
-      const startX = centerX + radius;
-      const startY = centerY;
-      
-      // Draw the arc
-      const arc = `M ${startX} ${startY} A ${radius} ${radius} 0 1 0 ${startX - 0.01} ${startY}`;
-      
-      return arc;
+
+
+function createCirclePath(cx:number, cy:number, radius:number) {
+  return `M ${cx},${cy} m -${radius},0 a ${radius},${radius} 0 1,0 ${radius * 2},0 a ${radius},${radius} 0 1,0 -${radius * 2},0`;
+}
+
+function createEllipsePath(cx:number, cy:number, radiusX:number, radiusY:number) {
+  return `M ${cx},${cy} m -${radiusX},0 a ${radiusX},${radiusY} 0 1,0 ${radiusX * 2},0 a ${radiusX},${radiusY} 0 1,0 -${radiusX * 2},0`;
+}
+
+function generateRhombusPath(x: number, y: number, width: number, height: number) {
+  // Calculate half width and half height
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+
+  // Define the points of the rhombus relative to the center (x, y)
+  const points = [
+      { x: x, y: y - halfHeight },   // Top point
+      { x: x + halfWidth, y: y },     // Right point
+      { x: x, y: y + halfHeight },    // Bottom point
+      { x: x - halfWidth, y: y }      // Left point
+  ];
+
+  // Construct the SVG path
+  let path = "M " + points[0].x + " " + points[0].y; // Move to the first point
+  for (let i = 1; i < points.length; i++) {
+      path += " L " + points[i].x + " " + points[i].y; // Line to the next point
+  }
+  path += " Z"; // Close the path
+
+  return path;
+}
+
+function generateParallelogramPath(x: number, y: number, width: number, height: number, skew: number) {
+  // Calculate half width and half height
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+
+  // Define the points of the rhombus relative to the center (x, y)
+  const points = [
+      { x: x - halfWidth + skew, y: y - halfHeight },   // Top point
+      { x: x + halfWidth + skew, y: y - halfHeight },     // Right point
+      { x: x + halfWidth - skew, y: y + halfHeight },    // Bottom point
+      { x: x - halfWidth - skew, y: y + halfHeight }      // Left point
+  ];
+
+  // Construct the SVG path
+  let path = "M " + points[0].x + " " + points[0].y; // Move to the first point
+  for (let i = 1; i < points.length; i++) {
+      path += " L " + points[i].x + " " + points[i].y; // Line to the next point
+  }
+  path += " Z"; // Close the path
+
+  return path;
 }
 
 export function makeShape(node: Node): string {
-  return makeRect(node.width, node.height, node.x, node.y, 8)
-  // return makeCircle(node.width/2, 
-  //   node.x - node.width/2, 
-  //   node.y + node.height/2)
+  switch (node.type) {
+    case 'roundrect':
+      return makeRect(node.width, node.height, node.x, node.y, 10)
+    case 'rect':
+      return makeRect(node.width, node.height, node.x, node.y, 0)
+    case 'circle':
+      return createCirclePath(
+        node.x , 
+        node.y ,
+        (node.width > node.height ? node.width : node.height) / 2
+       )
+    case 'ellipse':
+      return createEllipsePath(
+        node.x , 
+        node.y ,
+        node.width / 2, 
+        node.height / 2
+       )
+    case 'rhombus': 
+      return generateRhombusPath(
+        node.x , 
+        node.y ,
+        node.width + 20, 
+        node.height + 20
+       )
+    case 'parallelogram':
+        return generateParallelogramPath(
+          node.x , 
+          node.y ,
+          node.width, 
+          node.height,
+          10
+         )
+    default:
+          return makeRect(node.width, node.height, node.x, node.y, 10)
+    }
+
+
+
+
+
+  
+
+
+
+  
+
 }

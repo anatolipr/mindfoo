@@ -2,7 +2,9 @@ import type { Direction } from "./directions";
 
 export type NodeId = string | number;
 
-export type NodeType = 'rect' | 'circle';
+
+export const DEFAULT_NODE_TYPE: NodeType = 'roundrect';
+export type NodeType = 'roundrect' | 'rect' | 'circle' | 'ellipse' | 'rhombus' | 'parallelogram';
 
 
 export type Node = {

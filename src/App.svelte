@@ -133,7 +133,7 @@
 			class="item" 
 			tabindex="-1" 
 			role="button"
-			
+
 			on:mousedown|stopPropagation={()=>{}}
 			on:dblclick|stopPropagation={()=>{}}
 			on:contextmenu|stopPropagation={()=>{}}
@@ -230,6 +230,10 @@
 		overflow:visible;
 		outline:none;
 		user-select:none;
+	}
+
+	.item div {
+		text-align: center;
 	}
 
 	.selected {
