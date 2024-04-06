@@ -3,9 +3,13 @@ import type { Direction } from "./directions";
 export type NodeId = string | number;
 
 
-export const DEFAULT_NODE_TYPE: NodeType = 'roundrect';
-export type NodeType = 'roundrect' | 'rect' | 'circle' | 'ellipse' | 'rhombus' | 'parallelogram';
-
+export const DEFAULT_NODE_TYPE: NodeType = 0;
+export enum NodeType {
+    roundrect, rect, 
+    circle, ellipse, 
+    rhombus, 
+    parallelogram
+}
 
 export type Node = {
     id:     NodeId,

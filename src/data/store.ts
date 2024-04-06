@@ -2,7 +2,7 @@
 import  Foo  from 'avos/src/foo-store/foo';
 
 import { type Line, type Link, type Coordinates, 
-    type Node, type NodeId, type OptionalSelectedIndex, UNSELECTED, DEFAULT_WIDTH, DEFAULT_DASH } from './types';
+    type Node, type NodeId, type OptionalSelectedIndex, UNSELECTED, DEFAULT_WIDTH, DEFAULT_DASH, DEFAULT_NODE_TYPE } from './types';
 import { nanoid } from 'nanoid';
 import { tick } from 'svelte';
 import { lineCurveFactor } from './consts';
@@ -12,6 +12,7 @@ import { determineNextDirection, directions, toggleArrows, type Direction } from
 import { readFile, saveFile } from 'avos/src/util';
 import { rgbAsHex } from '../util';
 import { nextDash, nextWidth } from './properties/linkPropertiesHelper';
+import { nextNodeType } from './properties/nodePropertiesHelper';
 
 export const $nodes: Foo<Node[]> = new Foo(<Node[]>[]);
 export const $links: Foo<Link[]> = new Foo(<Link[]>[]);
@@ -137,6 +138,7 @@ export async function add() {
                 minHeight: 0,
                 minWidth: 0,
                 color: '',
+                type: DEFAULT_NODE_TYPE
             }
         );
 
@@ -428,6 +430,21 @@ export function equalSpacing(cProp: string, diProp: string): void {
     
 }
 
+export function rotateNodeType() {
+    let selection = $selection.get();
+    if (selection.length < 1) return;
+
+    $nodes.update(nodes0 => {
+        nodes0.forEach((node,idx) => {
+            if (selection.indexOf(idx) > -1) {
+                node.type = nextNodeType(node.type);
+            }
+        })
+        return nodes0;
+    })
+    
+}
+
 export function mirror(cProp: string, diProp: string): void {
 
     if ($selection.get().length < 2) return;
@@ -629,6 +646,8 @@ async function keydown(e: KeyboardEvent): Promise<void> {
             mirror('x', 'width');
         } else if (e.key === 'M') {
             mirror('y', 'height');
+        } else if (e.key === ' ') {
+            rotateNodeType();
         } else if (e.key === 'Tab') {
 
             e.stopPropagation();
