@@ -1,5 +1,27 @@
 
 
+export function nextElement<T>(array: T[], current: T | undefined): T {
+  if (array === undefined || array.length === 0) {
+    throw "Array cannot be empty or undefined"
+  }
+
+  if (current === undefined) return array[0];
+
+  let currentIndex: number = array.indexOf(current);
+
+  let next: number;
+  if (currentIndex < 0) {
+      next = 0;
+  } else {
+      next = currentIndex + 1;
+
+      if (currentIndex >= array.length - 1) {
+          next = 0;
+      }
+  }
+
+  return array[next];
+}
 
 export function rgbAsHex(rgba: number[]) {
   return '#' + rgba

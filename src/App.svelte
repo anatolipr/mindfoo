@@ -2,8 +2,9 @@
 	
 	import {onMount, tick} from 'svelte';
 	import { getContrastColor } from 'avos/src/color-util'
+	import {$theme as theme} from './data/theme'
+	
 	import { 
-		$theme as theme,
 		$lines as lines, 
 		$links as links,
 		init, 
@@ -28,17 +29,16 @@
         mouseup,
         add,
         wheel,
-        toggleTheme,
+        
         lineProp
-
-
-
 
 	} from './data/store';
 	
 	import { HsvPicker } from 'svelte-color-picker';
     import type { NodeId } from './data/types';
     import { selectText } from './util';
+    import { determineArrow } from './data/directions';
+    import { toggleTheme } from './data/theme';
      
 	 onMount ( init )
 
@@ -49,6 +49,8 @@
 		element?.focus();
 		selectText(element!);
 	}
+
+
 
 </script>
 
@@ -85,9 +87,10 @@
 					stroke-width={$links[i].width || 2}
 					stroke-dasharray={$links[i].dash}
 					d={line.c}
-					marker-end="{( ($links[i].direction === 'right' && !line.reverse) || (line.reverse && $links[i].direction === 'left')) || $links[i].direction === 'both' ? 'url(#arrow)' : ''}"
-					marker-start="{( ($links[i].direction === 'left' && !line.reverse) || (line.reverse && $links[i].direction === 'right')) || $links[i].direction === 'both' ? 'url(#arrow)' : ''}"
+					marker-start="{determineArrow(true, line.reverse, $links[i].direction) ? 'url(#arrow)' : ''}"
+					marker-end="{determineArrow(false, line.reverse, $links[i].direction) ? 'url(#arrow)' : ''}"
 			/>
+
 			{#if $links[i].text}
 				<text role="none" dy="-10" 
 				style="user-select:none; cursor: pointer;" 

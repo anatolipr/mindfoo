@@ -1,14 +1,14 @@
 
 import  Foo  from 'avos/src/foo-store/foo';
 
-import type { Line, Link, Coordinates, 
-    Node, NodeId, optionalSelectedIndex } from './types';
+import { type Line, type Link, type Coordinates, 
+    type Node, type NodeId, type OptionalSelectedIndex, UNSELECTED } from './types';
 import { nanoid } from 'nanoid';
 import { tick } from 'svelte';
 import { lineCurveFactor } from './consts';
 import intersect from "path-intersection"
 import { deCasteljau, makeCurve, makeRect } from '../geo';
-import { directions } from './directions';
+import { determineNextDirection, directions, toggleArrows, type Direction } from './directions';
 import { readFile, saveFile } from 'avos/src/util';
 import { rgbAsHex } from '../util';
 
@@ -25,22 +25,12 @@ export const $editing: Foo<boolean> = new Foo(false);
 
 export const $selection: Foo<number[]> = new Foo(<number[]>[], "selection");
 export const $previousSelection: Foo<number[]> = new Foo(<number[]>[]);
-export const $selectedLink: Foo<optionalSelectedIndex> = new Foo(-1);
-
+export const $selectedLink: Foo<OptionalSelectedIndex> = new Foo(UNSELECTED as OptionalSelectedIndex);
 
 export const $nodeMap: Foo<{[key: NodeId]: Node}> = new Foo({});
 
 export const $selecting: Foo<boolean> = new Foo(false);
 export const $menu: Foo<string> = new Foo('');
-
-export const $theme: Foo<string> = new Foo('dark');
-
-$theme.subscribe(theme => 
-   {document.body.classList.toggle('dark', theme === 'dark')}
-)
-export function toggleTheme(): void {
-    $theme.set($theme.get() === 'dark' ? 'light' : 'dark')
-}
 
 // ---
 
@@ -62,30 +52,17 @@ export function init() {
 export function rotateArrows(i: number) {
 
     $links.update(links => {
-
-        let nextDirection;
-        let currentDirection = directions.indexOf(links[i].direction);
-
-        if (currentDirection < 0) {
-            nextDirection = 0;
-        } else {
-            nextDirection = currentDirection + 1;
-
-            if (currentDirection >= directions.length - 1) {
-                nextDirection = 0
-            }
-        }
-        links[i].direction = directions[nextDirection]
-        
+        links[i].direction = 
+           determineNextDirection(links[i].direction)
         return links;
     })
     
 }
 
-export function lineProp(prop: string) {
-    let selectedLink = $selectedLink.get();
-    if (selectedLink === -1) return;
 
+export function lineProp(prop: string) {
+    let selectedLink: OptionalSelectedIndex = $selectedLink.get();
+    if (selectedLink === UNSELECTED) return;
     
     $links.update(links => {
         let text = prompt("line " + prop, (links[selectedLink] as any)[prop])
@@ -191,14 +168,14 @@ function makeLines(): void {
     const links: Link[] = $links.get()
     const nodes = $nodeMap.get();
 
-    let result: Line[] = [];
+    let lines: Line[] = [];
 
     for(let i = 0; i<links.length; i++) {
 
         let link = links[i];
 
-        let node1 = nodes[link.one];
-        let node2 = nodes[link.two];
+        let node2 = nodes[link.one];
+        let node1 = nodes[link.two];
         let cp1, cp2;
 
         let reverse = false;
@@ -229,16 +206,17 @@ function makeLines(): void {
                 c = deCasteljau(c, i1[0].t1);
         }
 
-        result.push(
+        lines.push(
                 {	id: node1.id + '-' + node2.id,
                     c: makeCurve(c),
-                    reverse
+                    reverse,
                 }
         );
     }
 
-    $lines.set(result);
+    $lines.set(lines);
 }
+
 
 function makeNodesMap(nodes0: Node[]): void {
 
@@ -274,7 +252,7 @@ export function selectNode(i: number, e: MouseEvent) {
 
     let selection = $selection.get();
 
-    $selectedLink.set(-1);
+    $selectedLink.set(UNSELECTED);
     $moving.set(true);
 
     if (e.shiftKey) {
@@ -677,9 +655,25 @@ async function keydown(e: KeyboardEvent): Promise<void> {
             $previousSelection.set([])
         }
 
-    } else if ($selectedLink.get() !== -1) {
+    } else if ($selectedLink.get() !== UNSELECTED) {
+        let selectedLink = $selectedLink.get();
 
-        if (e.key === 'Backspace') {
+        
+        if (['ArrowLeft', 'ArrowRight'].includes(e.key) ) {
+            const keyMap: {[key: string]: Direction} = {
+                'ArrowLeft': 'left', 'ArrowRight': 'right',
+            }
+            const toggle = ((toggleDirection: Direction) => {
+                $links.update(links => {
+                    links[selectedLink].direction = 
+                    toggleArrows(links[selectedLink].direction, toggleDirection)
+                    return links
+                })
+            })
+
+            toggle(keyMap[e.key]);
+            
+        } else if (e.key === 'Backspace') {
             lineDelete($selectedLink.get());
         } else if (e.key === ' ') {
             rotateArrows($selectedLink.get())
@@ -696,14 +690,14 @@ export function lineDelete(i: number): void {
                 return links;
             })
 
-    $selectedLink.set(-1);
+    $selectedLink.set(UNSELECTED);
     makeLines();
 }
 
 export function bodyMouseDown(e: MouseEvent) {
     $moving.set(false);
     $editing.set(false);
-    $selectedLink.set(-1);
+    $selectedLink.set(UNSELECTED);
     $selecting.set(true);
 
     $selectionStart.set({...$mouse.get()})
@@ -715,7 +709,7 @@ export function colorChange(e: CustomEvent) {
 
     const selection = $selection.get();
     const selectedLink = $selectedLink.get();
-    if(selection.length === 0 && selectedLink === -1) return;
+    if(selection.length === 0 && selectedLink === UNSELECTED) return;
 
     let c: {r:number, g:number, b:number, a:number} = e.detail;
     let hex = rgbAsHex([c.r, c.g, c.b, Math.round(c.a*255)]);
