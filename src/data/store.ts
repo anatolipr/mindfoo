@@ -82,12 +82,31 @@ export function rotateArrows(i: number) {
     
 }
 
-export function lineClick(i: number) {
+export function lineProp(prop: string) {
+    let selectedLink = $selectedLink.get();
+    if (selectedLink === -1) return;
+
+    
+    $links.update(links => {
+        let text = prompt("line " + prop, (links[selectedLink] as any)[prop])
+        if (text !== null) {
+            (links[selectedLink] as any)[prop] = text
+        }
+        return links;
+    })
+}
+
+export function lineClick(i: number, text: boolean = false) {
     let prevSelected = $selectedLink.get();
     $selectedLink.set(i);
     $selection.set([]);
     
-    if (prevSelected !== i) return;
+    if (text) {
+        lineProp('text');
+        return
+    }
+
+    if (prevSelected !== i || text) return;
     rotateArrows(i);
 }
 
@@ -182,7 +201,13 @@ function makeLines(): void {
         let node2 = nodes[link.two];
         let cp1, cp2;
 
-        if (node1.x <= node2.x) {
+        let reverse = false;
+        if (node1.x < node2.x) {
+            let node1a  = node1;
+            node1 = node2;
+            node2 = node1a;
+            reverse = true;
+            
             cp1 = node2.x - (node2.x - node1.x) * lineCurveFactor;
             cp2 = node1.x + (node2.x - node1.x) * lineCurveFactor;
         } else {
@@ -206,7 +231,8 @@ function makeLines(): void {
 
         result.push(
                 {	id: node1.id + '-' + node2.id,
-                    c: makeCurve(c)
+                    c: makeCurve(c),
+                    reverse
                 }
         );
     }
@@ -686,16 +712,26 @@ export function bodyMouseDown(e: MouseEvent) {
 }
 
 export function colorChange(e: CustomEvent) {
-    const selection = $selection.get()
-    if(selection.length === 0) return;
+
+    const selection = $selection.get();
+    const selectedLink = $selectedLink.get();
+    if(selection.length === 0 && selectedLink === -1) return;
 
     let c: {r:number, g:number, b:number, a:number} = e.detail;
     let hex = rgbAsHex([c.r, c.g, c.b, Math.round(c.a*255)]);
 
-    $nodes.update(nodes0 => {
-        selection.forEach(i => nodes0[i].color = hex)
-        return nodes0;
-    })
+    if (selection.length > 0) {
+        $nodes.update(nodes0 => {
+            selection.forEach(i => nodes0[i].color = hex)
+            return nodes0;
+        })
+    } else {
+        $links.update(links => {
+            links[selectedLink].color = hex
+            return links;
+        })
+    }
+    
 }
 
 

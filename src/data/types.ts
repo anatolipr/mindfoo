@@ -1,18 +1,20 @@
 export type NodeId = string | number;
 
 export type Node = {
-    id:     NodeId;
-    width:  number;
-    minWidth:  number;
-    height:     number;
-    minHeight: number;
-    x:      number;
-    y:      number;
-    color:  string;
-    text:   string;
+    id:     NodeId,
+    width:  number,
+    minWidth:  number,
+    height:     number,
+    minHeight: number,
+    x:      number,
+    y:      number,
+    color:  string,
+    text:   string,
+    size?:   number,
+    type?:  string
 } & {[key: string]: any}
 
-export type Direction = 'none' | 'both' | 'left' | 'right' | undefined;
+export type Direction = 'none' | 'both' | 'left' | 'right';
 
 export type unselected = -1;
 export type optionalSelectedIndex = number | unselected;
@@ -32,7 +34,13 @@ export type Link = {
     /**
      * arrow placement
      */
-    direction: Direction
+    direction: Direction,
+
+    dash?: string,
+    color?: string,
+    width?: string,
+    text?: string,
+    textSize?: string
 }
 
 /**
@@ -42,11 +50,13 @@ export type Line = {
     /**
      * string typically concatenating participating node ids node1.id + '-' + node2.id
      */
-    id: string;
+    id: string,
     /**
      * curve
      */
-    c: string;
+    c: string,
+    reverse: boolean
+
 }
 
 export type Coordinates = {

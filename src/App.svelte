@@ -28,8 +28,10 @@
         mouseup,
         add,
         wheel,
+        toggleTheme,
+        lineProp
 
-        toggleTheme
+
 
 
 	} from './data/store';
@@ -74,15 +76,36 @@
 		</marker>
 
 		{#each $lines as line, i (line.id)}
-			<path role="none"
+			<path role="none" id="path{i}" 
 					class:lineSelected={i === $selectedLink}
 					on:mousedown|stopPropagation|preventDefault={() => lineClick(i)}
 					on:contextmenu|stopPropagation|preventDefault={() => lineDelete(i)}
-					class=line fill="none" stroke=black stroke-width=2 d={line.c}
-					marker-end="{$links[i].direction === 'right' || $links[i].direction === 'both' ? 'url(#arrow)' : ''}"
-					marker-start="{$links[i].direction === 'left' || $links[i].direction === 'both' ? 'url(#arrow)' : ''}"
+					class=line fill="none" 
+					stroke={$links[i].color || 'var(--fg-2)'}
+					stroke-width={$links[i].width || 2}
+					stroke-dasharray={$links[i].dash}
+					d={line.c}
+					marker-end="{( ($links[i].direction === 'right' && !line.reverse) || (line.reverse && $links[i].direction === 'left')) || $links[i].direction === 'both' ? 'url(#arrow)' : ''}"
+					marker-start="{( ($links[i].direction === 'left' && !line.reverse) || (line.reverse && $links[i].direction === 'right')) || $links[i].direction === 'both' ? 'url(#arrow)' : ''}"
 			/>
+			{#if $links[i].text}
+				<text role="none" dy="-10" 
+				style="user-select:none; cursor: pointer;" 
+				class:lineSelected={i === $selectedLink}
+				on:mousedown|stopPropagation|preventDefault={() => lineClick(i, true)}>
+				<textPath 
+					dominant-baseline="top" 
+					startOffset="50%"
+					text-anchor="middle"
+					fill={$links[i].color || 'var(--fg-2)'}
+					
+					href="#path{i}">{$links[i].text}</textPath>
+				</text>
+		    {/if}
 		{/each}
+		
+		
+		
 	</svg>
 
 	{#each $nodes as node, i (node.id)}
@@ -130,13 +153,19 @@
 
 <div role="menu" tabindex="0" class="menu" on:mousedown|stopPropagation>
 
+	<button on:click="{toggleTheme}">{$theme === 'dark' ? 'light' : 'dark'}</button>
 	<button on:click={() => $menu = $menu==='color'?'':'color'}>color</button>
 	{#if $menu === 'color'}
 		<HsvPicker on:colorChange={colorChange} startColor="#ffffff"/>
 	{/if}
 	<button on:click="{doExport}">export</button>
 	<button on:click="{doImport}">import</button>
-	<button on:click="{toggleTheme}">{$theme === 'dark' ? 'light' : 'dark'}</button>
+	{#if $selectedLink > -1}
+	<button on:click="{() => lineProp('text')}">line text</button>
+	<button on:click="{() => lineProp('dash')}">line dash</button>
+	<button on:click="{() => lineProp('width')}">line width</button>
+	{/if}
+	
 
 	<button on:click="{() => alert('MindFoo by Anatoli Radulov')}">about</button>
 </div>
@@ -167,13 +196,8 @@
 		overflow:visible;
 		position: absolute;
 	}
-	.line {
-		stroke: var(--fg-2);
-	}
-	.line:hover {
-		stroke:red;
-		cursor:pointer;
-	}
+
+
 
 
 	.item {
@@ -192,7 +216,13 @@
 	.selected {
 		border: 1px dashed;
 	}
+
+	.line:hover {
+		stroke-opacity: 0.5;
+		cursor:pointer;
+	}
+
 	.lineSelected {
-		stroke: red;
+		stroke-opacity: 0.5;
 	}
 </style>
