@@ -11,6 +11,7 @@ import { deCasteljau, makeCurve, makeRect } from '../geo';
 import { determineNextDirection, directions, toggleArrows, type Direction } from './directions';
 import { readFile, saveFile } from 'avos/src/util';
 import { rgbAsHex } from '../util';
+import { DEFAULT_DASH, DEFAULT_WIDTH, nextDash, nextWidth } from './lineProperties';
 
 export const $nodes: Foo<Node[]> = new Foo(<Node[]>[]);
 export const $links: Foo<Link[]> = new Foo(<Link[]>[]);
@@ -49,7 +50,9 @@ export function init() {
 
 
 
-export function rotateArrows(i: number) {
+export function rotateArrows(): void {
+    const i = $selectedLink.get();
+    if (i === UNSELECTED) return;
 
     $links.update(links => {
         links[i].direction = 
@@ -59,15 +62,35 @@ export function rotateArrows(i: number) {
     
 }
 
+export function rotateLineDash(): void {
+    const i = $selectedLink.get();
+    if (i === UNSELECTED) return;
 
-export function lineProp(prop: string) {
+    $links.update(links => {
+        links[i].dash = nextDash(links[i].dash)
+        return links
+    })
+}
+
+export function rotateLineWidth(): void {
+    const i = $selectedLink.get();
+    if (i === UNSELECTED) return;
+
+    $links.update(links => {
+        links[i].width = nextWidth(links[i].width)
+        return links
+    })
+}
+
+
+export function lineText() {
     let selectedLink: OptionalSelectedIndex = $selectedLink.get();
     if (selectedLink === UNSELECTED) return;
     
     $links.update(links => {
-        let text = prompt("line " + prop, (links[selectedLink] as any)[prop])
+        let text = prompt("line text:", links[selectedLink].text)
         if (text !== null) {
-            (links[selectedLink] as any)[prop] = text
+            links[selectedLink].text = text
         }
         return links;
     })
@@ -79,12 +102,12 @@ export function lineClick(i: number, text: boolean = false) {
     $selection.set([]);
     
     if (text) {
-        lineProp('text');
+        lineText();
         return
     }
 
     if (prevSelected !== i || text) return;
-    rotateArrows(i);
+    rotateArrows();
 }
 
 export async function add() {
@@ -122,17 +145,7 @@ export async function add() {
         makeNodesMap(nodes0);
 
         if (selected !== undefined) {
-            
-            $links.update(links => {
-                links.push({
-                    one: nodes0[selected!].id,
-                    two: id,
-                    direction: 'none'
-                });
-
-                return links;
-            })
-            
+            addLink(nodes0[selected!].id, id);
         }
 
         $selection.set([nodes0.length - 1])
@@ -285,18 +298,8 @@ export function selectNode(i: number, e: MouseEvent) {
                             link.two === nodes0[previous].id)
             )
 
-
             if (!found) {
-                
-                $links.update(links => {
-                    links.push({
-                        one: nodes0[previous].id,
-                        two: nodes0[selected].id,
-                        direction: 'none'
-                    });
-                    return links;
-                })
-
+                addLink(nodes0[previous].id, nodes0[selected].id)
                 makeLines()
             }
 
@@ -305,6 +308,20 @@ export function selectNode(i: number, e: MouseEvent) {
     }
 }
 
+export function addLink(one: NodeId, two: NodeId): void {
+
+    $links.update(links => {
+        links.push({
+            one,
+            two,
+            direction: 'none',
+            width: DEFAULT_WIDTH,
+            dash: DEFAULT_DASH
+        });
+        return links;
+    })
+
+}
 
 export function mouseup(e: MouseEvent) {
     if ($selecting.get()) {
@@ -658,8 +675,13 @@ async function keydown(e: KeyboardEvent): Promise<void> {
     } else if ($selectedLink.get() !== UNSELECTED) {
         let selectedLink = $selectedLink.get();
 
-        
-        if (['ArrowLeft', 'ArrowRight'].includes(e.key) ) {
+        if (e.key === 'w') {
+            rotateLineWidth();
+        } else if (e.key === '.') {
+            rotateLineDash();
+        } else if (e.key === 'Enter') {
+            lineText();
+        } else if (['ArrowLeft', 'ArrowRight'].includes(e.key) ) {
             const keyMap: {[key: string]: Direction} = {
                 'ArrowLeft': 'left', 'ArrowRight': 'right',
             }
@@ -676,7 +698,7 @@ async function keydown(e: KeyboardEvent): Promise<void> {
         } else if (e.key === 'Backspace') {
             lineDelete($selectedLink.get());
         } else if (e.key === ' ') {
-            rotateArrows($selectedLink.get())
+            rotateArrows()
         }
 
     }
@@ -693,6 +715,8 @@ export function lineDelete(i: number): void {
     $selectedLink.set(UNSELECTED);
     makeLines();
 }
+
+
 
 export function bodyMouseDown(e: MouseEvent) {
     $moving.set(false);

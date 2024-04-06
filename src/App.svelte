@@ -30,7 +30,16 @@
         add,
         wheel,
         
-        lineProp
+        lineText,
+
+        rotateArrows,
+
+        rotateLineDash,
+
+        rotateLineWidth
+
+
+
 
 	} from './data/store';
 	
@@ -49,8 +58,6 @@
 		element?.focus();
 		selectText(element!);
 	}
-
-
 
 </script>
 
@@ -71,10 +78,14 @@
 <div class="container"
 	 style="left:{$scene.x}px; top:{$scene.y}px;">
 	<svg style="overflow:visible">
-		<marker id="arrow" viewBox="0 0 10 10" refX="15" refY="5"
-				markerWidth="4" markerHeight="5"
+		<marker id="arrow" viewBox="0 0 10 15" 
+				refX="9" 
+				refY="5"
+				markerWidth="4" 
+				markerHeight="20"
+				fill="var(--fg-2)"
 				orient="auto-start-reverse">
-			<path d="M 0 0 L 15 5 L 0 10 z" fill="var(--fg-2)" />
+			<path d="M0,0 L10,5 L0,10 Z" fill="" />
 		</marker>
 
 		{#each $lines as line, i (line.id)}
@@ -82,6 +93,7 @@
 					class:lineSelected={i === $selectedLink}
 					on:mousedown|stopPropagation|preventDefault={() => lineClick(i)}
 					on:contextmenu|stopPropagation|preventDefault={() => lineDelete(i)}
+					on:dblclick|stopPropagation={() => {}}
 					class=line fill="none" 
 					stroke={$links[i].color || 'var(--fg-2)'}
 					stroke-width={$links[i].width || 2}
@@ -106,9 +118,6 @@
 				</text>
 		    {/if}
 		{/each}
-		
-		
-		
 	</svg>
 
 	{#each $nodes as node, i (node.id)}
@@ -154,7 +163,7 @@
 
 </div>
 
-<div role="menu" tabindex="0" class="menu" on:mousedown|stopPropagation>
+<div role="menu" tabindex="0" class="menu" on:mousedown|stopPropagation on:dblclick|stopPropagation={() => {}}>
 
 	<button on:click="{toggleTheme}">{$theme === 'dark' ? 'light' : 'dark'}</button>
 	<button on:click={() => $menu = $menu==='color'?'':'color'}>color</button>
@@ -164,9 +173,10 @@
 	<button on:click="{doExport}">export</button>
 	<button on:click="{doImport}">import</button>
 	{#if $selectedLink > -1}
-	<button on:click="{() => lineProp('text')}">line text</button>
-	<button on:click="{() => lineProp('dash')}">line dash</button>
-	<button on:click="{() => lineProp('width')}">line width</button>
+		<button on:click="{lineText}">line text</button>
+		<button on:click="{rotateArrows}">arrows</button>
+		<button on:click="{rotateLineDash}">line dash</button>
+		<button on:click="{rotateLineWidth}">line width</button>
 	{/if}
 	
 
