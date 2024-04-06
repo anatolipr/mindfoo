@@ -2,16 +2,16 @@
 import  Foo  from 'avos/src/foo-store/foo';
 
 import { type Line, type Link, type Coordinates, 
-    type Node, type NodeId, type OptionalSelectedIndex, UNSELECTED } from './types';
+    type Node, type NodeId, type OptionalSelectedIndex, UNSELECTED, DEFAULT_WIDTH, DEFAULT_DASH } from './types';
 import { nanoid } from 'nanoid';
 import { tick } from 'svelte';
 import { lineCurveFactor } from './consts';
 import intersect from "path-intersection"
-import { deCasteljau, makeCurve, makeRect } from '../geo';
+import { deCasteljau, makeCurve, makeRect, makeShape } from '../geo';
 import { determineNextDirection, directions, toggleArrows, type Direction } from './directions';
 import { readFile, saveFile } from 'avos/src/util';
 import { rgbAsHex } from '../util';
-import { DEFAULT_DASH, DEFAULT_WIDTH, nextDash, nextWidth } from './lineProperties';
+import { nextDash, nextWidth } from './properties/linkPropertiesHelper';
 
 export const $nodes: Foo<Node[]> = new Foo(<Node[]>[]);
 export const $links: Foo<Link[]> = new Foo(<Link[]>[]);
@@ -129,8 +129,8 @@ export async function add() {
         nodes0.push(
             {
                 id,
-                width: 0,
-                height: 0,
+                width: 140,
+                height: 140,
                 x,
                 y,
                 text: 'Enter',
@@ -210,11 +210,11 @@ function makeLines(): void {
             [cp2, node2.y],
             [node2.x, node2.y]];
 
-        let i1 = intersect(makeCurve(c), makeRect(node2.width, node2.height, node2.x, node2.y, 8));
+        let i1 = intersect(makeCurve(c), makeShape(node2));
 
         if (i1 && i1[0]) {
             c = deCasteljau(c, i1[0].t1);
-            i1 = intersect(makeCurve(c.reverse()), makeRect(node1.width, node1.height, node1.x, node1.y, 8));
+            i1 = intersect(makeCurve(c.reverse()), makeShape(node1));
             if(i1 && i1[0])
                 c = deCasteljau(c, i1[0].t1);
         }

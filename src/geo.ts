@@ -1,3 +1,5 @@
+import type { Node } from "./data/types";
+
 function nc(a: number[], b: number[], t: number): number[] {
   return [
     a[0] + ((b[0] - a[0]) * t),
@@ -58,4 +60,23 @@ export function makeRect(width: number, height: number, cx: number, cy: number, 
     return `M ${cx - halfX} ${cy - halfY} 
 				 h ${width} v ${height} h -${width} v -${height} `
   }
+}
+
+export function makeCircle(radius: number, centerX: number, centerY: number): string {
+
+      // Move to the starting point of the circle
+      const startX = centerX + radius;
+      const startY = centerY;
+      
+      // Draw the arc
+      const arc = `M ${startX} ${startY} A ${radius} ${radius} 0 1 0 ${startX - 0.01} ${startY}`;
+      
+      return arc;
+}
+
+export function makeShape(node: Node): string {
+  return makeRect(node.width, node.height, node.x, node.y, 8)
+  // return makeCircle(node.width/2, 
+  //   node.x - node.width/2, 
+  //   node.y + node.height/2)
 }

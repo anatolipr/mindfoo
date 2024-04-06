@@ -1,7 +1,9 @@
 import type { Direction } from "./directions";
-import type { Dash, Width } from "./lineProperties";
 
 export type NodeId = string | number;
+
+export type NodeType = 'rect' | 'circle';
+
 
 export type Node = {
     id:     NodeId,
@@ -14,7 +16,7 @@ export type Node = {
     color:  string,
     text:   string,
     size?:   number,
-    type?:  string
+    type?:  NodeType
 } & {[key: string]: any}
 
 
@@ -22,6 +24,13 @@ export type Node = {
 export type unselected = -1;
 export const UNSELECTED: unselected = -1;
 export type OptionalSelectedIndex = number | unselected;
+
+
+
+export type Width = 2 | 4 | 6;
+export const DEFAULT_WIDTH: Width = 2;
+export type Dash = '' | '4' 
+export const DEFAULT_DASH: Dash = '';
 
 /**
  * connection between two notes

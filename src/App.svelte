@@ -48,6 +48,7 @@
     import { selectText } from './util';
     import { determineArrow } from './data/directions';
     import { toggleTheme } from './data/theme';
+    import { makeShape } from './geo';
      
 	 onMount ( init )
 
@@ -62,17 +63,7 @@
 </script>
 
 {#if $nodes.length === 0}
-	<div style="
-	position: absolute;
-	width:100%;
-	height:100%;
-	display: flex;
-	justify-content: center;
-	align-items: center;
-	user-select: none;
-	color: gray;
-	font-size: 18px;
-	">Double click somewhere to start</div>
+	<div class="emptyScene">Double click somewhere to start</div>
 {/if}
 
 <div class="container"
@@ -118,24 +109,46 @@
 				</text>
 		    {/if}
 		{/each}
+
+		{#each $nodes as node, i (node.id)}
+		<path role="none" 
+			class=shp
+			class:selected={$selection.indexOf(i) > -1}
+
+			pointer-events="visble"
+			on:mousedown|stopPropagation={(e) => selectNode(i, e)}
+			on:contextmenu|stopPropagation|preventDefault={(e) => selectNode(i, e)}
+			on:dblclick|stopPropagation={() => toggleEdit(node.id)}
+
+			fill={node.color ? node.color : 'var(--bg-1)'}
+			stroke={'var(--fg-2)'}
+			stroke-width={2}
+			d={makeShape(node)}
+			/>
+		{/each}
 	</svg>
 
 	{#each $nodes as node, i (node.id)}
-		<div id="d{node.id}" class="item" tabindex="-1" role="button"
-			 style="left: {node.x - node.width/2}px;
+		<div id="d{node.id}" 
+			class="item" 
+			tabindex="-1" 
+			role="button"
+			
+			on:mousedown|stopPropagation={()=>{}}
+			on:dblclick|stopPropagation={()=>{}}
+			on:contextmenu|stopPropagation={()=>{}}
+
+		    style="left: {node.x - node.width/2}px;
 					top: {node.y - node.height/2}px;
 					{node.minHeight > 0 ? `min-height:${node.minHeight}px;`:''}
 					{node.minWidth > 0 ? `min-width:${node.minWidth}px;`:''}
 					color: {node.color ? getContrastColor(node.color) : 'auto'};
-					background-color: {node.color ? node.color : 'auto'}
+					pointer-events: {$editing  ? 'auto!important':'none'} 
 				   "
 			 on:input={() => resize(i, true)}
 			 bind:clientWidth={node.width}
 			 bind:clientHeight={node.height}
-			 on:mousedown|stopPropagation={(e) => selectNode(i, e)}
-			 on:contextmenu|stopPropagation|preventDefault={(e) => selectNode(i, e)}
-			 
-			 class:selected={$selection.indexOf(i) > -1}>
+			 >
 			{#if $editing}
 				<div role="none" id="e{node.id}"
 					 on:blur={()=>$editing=false}
@@ -144,9 +157,8 @@
 					 on:keydown|stopPropagation={() => {}}
 				></div>
 			{:else}
-				<div role="none" on:dblclick|stopPropagation={() => toggleEdit(node.id)}>{@html node.text}</div>
+				<div role="none">{@html node.text}</div>
 			{/if}
-
 		</div>
 	{/each}
 
@@ -210,24 +222,18 @@
 		position: absolute;
 	}
 
-
-
-
 	.item {
 		white-space: nowrap;
 		box-sizing: border-box;
 		padding: 10px;
 		position: absolute;
-		background-color: var(--bg-1);
-		border: 1px solid var(--fg-2);
 		overflow:visible;
 		outline:none;
 		user-select:none;
-		border-radius: 8px;
 	}
 
 	.selected {
-		border: 1px dashed;
+		stroke-dasharray:4;
 	}
 
 	.line:hover {
@@ -237,5 +243,17 @@
 
 	.lineSelected {
 		stroke-opacity: 0.5;
+	}
+
+	.emptyScene {
+		position: absolute;
+		width:100%;
+		height:100%;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		user-select: none;
+		color: gray;
+		font-size: 18px;
 	}
 </style>
