@@ -114,7 +114,7 @@ export function lineClick(i: number, text: boolean = false) {
 export async function add() {
 
 
-    let id = nanoid();
+    let id = nanoid(5);
 
     $nodes.update((nodes0: Node[]) => {
 
