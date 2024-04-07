@@ -11,8 +11,8 @@ It is for the most part an attempt to make a more rapid mind mapping tool which 
   
 
 <img  width="500"  alt="image"  src="https://github.com/anatolipr/arrows/assets/29383028/0b98a73c-0c35-41a9-9047-a4f3d3f5defe">
-
-<img width="500" alt="image" src="https://github.com/anatolipr/arrows/assets/29383028/61dc6f8c-2794-4cf6-a7cf-fb1d5a14edd4">
+<br>
+<img width=800" alt="image" src="https://github.com/anatolipr/arrows/assets/29383028/61dc6f8c-2794-4cf6-a7cf-fb1d5a14edd4">
 
 
 **Online demo:**
