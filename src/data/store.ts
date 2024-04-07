@@ -10,7 +10,7 @@ import intersect from "path-intersection"
 import { deCasteljau, makeCurve, makeShape } from '../geo';
 import { determineNextDirection, toggleArrows, type Direction } from './directions';
 import { readFile, saveFile } from 'avos/src/util';
-import { rgbAsHex } from '../util';
+import { rgbAsHex, selectText } from '../util';
 import { nextDash, nextWidth } from './properties/linkPropertiesHelper';
 import { nextNodeSize, nextNodeType } from './properties/nodePropertiesHelper';
 
@@ -637,7 +637,14 @@ async function keydown(e: KeyboardEvent): Promise<void> {
 
     if ($selection.get().length !== 0) {
 
-        if (e.key === 'ArrowLeft') {
+        if (e.key === 'Enter') {
+            const selection = $selection.get();
+            if (selection.length === 1) {
+                e.preventDefault()
+                toggleEdit($nodes.get()[selection[0]].id)
+                return;
+            }
+        } else if (e.key === 'ArrowLeft') {
             move('x', e.shiftKey ? -10 : -1)
         } else if (e.key === 'ArrowRight') {
             move('x', e.shiftKey ? 10 : 1)
@@ -715,7 +722,7 @@ async function keydown(e: KeyboardEvent): Promise<void> {
     } else if ($selectedLink.get() !== UNSELECTED) {
         let selectedLink = $selectedLink.get();
 
-        if (e.key === 'w') {
+        if (e.key === ']') {
             rotateLineWidth();
         } else if (e.key === '.') {
             rotateLineDash();
@@ -792,4 +799,12 @@ export function colorChange(e: CustomEvent) {
     
 }
 
+
+export async function toggleEdit(id: NodeId) {
+    $editing.set(true);
+    await tick();
+    let element = document.getElementById(`e${id}`);
+    element?.focus();
+    selectText(element!);
+}
 

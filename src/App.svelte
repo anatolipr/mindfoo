@@ -40,7 +40,10 @@
 
         rotateNodeType,
 
-        rotateNodeSize
+        rotateNodeSize,
+
+        toggleEdit
+
 
 
 
@@ -57,14 +60,6 @@
     import { makeShape } from './geo';
      
 	 onMount ( init )
-
-	 export async function toggleEdit(id: NodeId) {
-		editing.set(true);
-		await tick();
-		let element = document.getElementById(`e${id}`);
-		element?.focus();
-		selectText(element!);
-	}
 
 </script>
 
