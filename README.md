@@ -30,6 +30,7 @@ more coming soon:
 <br>
 <img width=800" alt="image" src="https://github.com/anatolipr/arrows/assets/29383028/61dc6f8c-2794-4cf6-a7cf-fb1d5a14edd4">
 
+
 **Online demo:**
 
 https://mindfoo.netlify.app/
@@ -38,7 +39,7 @@ Note: there is no support for mobile / touch screen devices, yet
   
 
 ## keyboard shortcuts
-<br>
+
 <img width="800" alt="image" src="https://github.com/anatolipr/arrows/assets/29383028/f93b50cd-727a-457a-8015-597c6b1d2320">
 
 
