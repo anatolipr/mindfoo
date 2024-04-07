@@ -2,14 +2,18 @@ import type { Direction } from "./directions";
 
 export type NodeId = string | number;
 
-
+export const DEFAULT_NODE_FONT_SIZE: NodeFontSize = '15px';
 export const DEFAULT_NODE_TYPE: NodeType = 0;
+
 export enum NodeType {
     roundrect, rect, 
     circle, ellipse, 
     rhombus, 
     parallelogram
 }
+
+export type NodeFontSize = '15px' | '20px' | '25px' | '30px';
+
 
 export type Node = {
     id:     NodeId,
@@ -21,7 +25,7 @@ export type Node = {
     y:      number,
     color:  string,
     text:   string,
-    size?:   number,
+    size?:   NodeFontSize,
     type?:  NodeType
 } & {[key: string]: any}
 

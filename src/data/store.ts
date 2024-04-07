@@ -2,19 +2,19 @@
 import  Foo  from 'avos/src/foo-store/foo';
 
 import { type Line, type Link, type Coordinates, 
-    type Node, type NodeId, type OptionalSelectedIndex, UNSELECTED, DEFAULT_WIDTH, DEFAULT_DASH, DEFAULT_NODE_TYPE } from './types';
+    type Node, type NodeId, type OptionalSelectedIndex, UNSELECTED, DEFAULT_WIDTH, DEFAULT_DASH, DEFAULT_NODE_TYPE, DEFAULT_NODE_FONT_SIZE } from './types';
 import { nanoid } from 'nanoid';
 import { tick } from 'svelte';
 import { lineCurveFactor } from './consts';
 import intersect from "path-intersection"
-import { deCasteljau, makeCurve, makeRect, makeShape } from '../geo';
-import { determineNextDirection, directions, toggleArrows, type Direction } from './directions';
+import { deCasteljau, makeCurve, makeShape } from '../geo';
+import { determineNextDirection, toggleArrows, type Direction } from './directions';
 import { readFile, saveFile } from 'avos/src/util';
 import { rgbAsHex } from '../util';
 import { nextDash, nextWidth } from './properties/linkPropertiesHelper';
-import { nextNodeType } from './properties/nodePropertiesHelper';
+import { nextNodeSize, nextNodeType } from './properties/nodePropertiesHelper';
 
-export const $nodes: Foo<Node[]> = new Foo(<Node[]>[]);
+export const $nodes: Foo<Node[]> = new Foo(<Node[]>[], 'nodes');
 export const $links: Foo<Link[]> = new Foo(<Link[]>[]);
 export const $lines: Foo<Line[]> = new Foo(<Line[]>[]);
 
@@ -138,6 +138,7 @@ export async function add() {
                 minHeight: 0,
                 minWidth: 0,
                 color: '',
+                size: DEFAULT_NODE_FONT_SIZE,
                 type: DEFAULT_NODE_TYPE
             }
         );
@@ -433,7 +434,7 @@ export function equalSpacing(cProp: string, diProp: string): void {
 export function rotateNodeType() {
     let selection = $selection.get();
     if (selection.length < 1) return;
-
+    
     $nodes.update(nodes0 => {
         nodes0.forEach((node,idx) => {
             if (selection.indexOf(idx) > -1) {
@@ -442,7 +443,25 @@ export function rotateNodeType() {
         })
         return nodes0;
     })
+
+    makeLines();
     
+}
+
+export function rotateNodeSize() {
+    let selection = $selection.get();
+    if (selection.length < 1) return;
+    
+    $nodes.update(nodes0 => {
+        nodes0.forEach((node,idx) => {
+            if (selection.indexOf(idx) > -1) {
+                node.size = nextNodeSize(node.size);
+            }
+        })
+        return nodes0;
+    })
+    
+    makeLines();
 }
 
 export function mirror(cProp: string, diProp: string): void {
@@ -648,6 +667,8 @@ async function keydown(e: KeyboardEvent): Promise<void> {
             mirror('y', 'height');
         } else if (e.key === ' ') {
             rotateNodeType();
+        } else if (e.key === ']') {
+            rotateNodeSize();
         } else if (e.key === 'Tab') {
 
             e.stopPropagation();

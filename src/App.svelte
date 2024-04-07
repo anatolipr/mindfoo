@@ -36,7 +36,13 @@
 
         rotateLineDash,
 
-        rotateLineWidth
+        rotateLineWidth,
+
+        rotateNodeType,
+
+        rotateNodeSize
+
+
 
 
 
@@ -140,6 +146,7 @@
 
 		    style="left: {node.x - node.width/2}px;
 					top: {node.y - node.height/2}px;
+					font-size: {node.size};
 					{node.minHeight > 0 ? `min-height:${node.minHeight}px;`:''}
 					{node.minWidth > 0 ? `min-width:${node.minWidth}px;`:''}
 					color: {node.color ? getContrastColor(node.color) : 'auto'};
@@ -191,6 +198,10 @@
 		<button on:click="{rotateLineWidth}">line width</button>
 	{/if}
 	
+	{#if $selection.length > 0}
+	<button on:click="{rotateNodeType}">type</button>
+	<button on:click="{rotateNodeSize}">size</button>
+	{/if}
 
 	<button on:click="{() => alert('MindFoo by Anatoli Radulov')}">about</button>
 </div>

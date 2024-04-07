@@ -1,4 +1,4 @@
-import type { Node } from "./data/types";
+import { NodeType, type Node } from "./data/types";
 
 function nc(a: number[], b: number[], t: number): number[] {
   return [
@@ -121,31 +121,31 @@ function generateParallelogramPath(x: number, y: number, width: number, height: 
 
 export function makeShape(node: Node): string {
   switch (node.type) {
-    case 'roundrect':
+    case NodeType.roundrect:
       return makeRect(node.width, node.height, node.x, node.y, 10)
-    case 'rect':
+    case NodeType.rect:
       return makeRect(node.width, node.height, node.x, node.y, 0)
-    case 'circle':
+    case  NodeType.circle:
       return createCirclePath(
         node.x , 
         node.y ,
         (node.width > node.height ? node.width : node.height) / 2
        )
-    case 'ellipse':
+    case  NodeType.ellipse:
       return createEllipsePath(
         node.x , 
         node.y ,
         node.width / 2, 
         node.height / 2
        )
-    case 'rhombus': 
+    case  NodeType.rhombus: 
       return generateRhombusPath(
         node.x , 
         node.y ,
         node.width + 20, 
         node.height + 20
        )
-    case 'parallelogram':
+    case  NodeType.parallelogram:
         return generateParallelogramPath(
           node.x , 
           node.y ,

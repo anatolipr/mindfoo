@@ -1,5 +1,5 @@
 import { nextElement } from "../../util";
-import { NodeType } from "../types";
+import { NodeType, type NodeFontSize } from "../types";
 
 
 export const types: NodeType[] = [
@@ -9,10 +9,14 @@ export const types: NodeType[] = [
     NodeType.ellipse, 
     NodeType.rhombus, 
     NodeType.parallelogram];
-    
-export const sizes: number[] = [1, 2, 3, 4]
+
+export const sizes: NodeFontSize[] = ['15px' , '20px' , '25px' , '30px']
 
 
 export function nextNodeType(current: NodeType | undefined): NodeType {
     return nextElement(types, current)
+}
+
+export function nextNodeSize(current: NodeFontSize | undefined): NodeFontSize {
+    return nextElement(sizes, current)
 }
