@@ -14,9 +14,9 @@ import { rgbAsHex } from '../util';
 import { nextDash, nextWidth } from './properties/linkPropertiesHelper';
 import { nextNodeSize, nextNodeType } from './properties/nodePropertiesHelper';
 
-export const $nodes: Foo<Node[]> = new Foo(<Node[]>[], 'nodes');
-export const $links: Foo<Link[]> = new Foo(<Link[]>[]);
-export const $lines: Foo<Line[]> = new Foo(<Line[]>[]);
+export const $nodes: Foo<Node[]> = new Foo(<Node[]>[], localStorage.getItem('debugNodes') ? 'nodes' : undefined);
+export const $links: Foo<Link[]> = new Foo(<Link[]>[], localStorage.getItem('debugLinks') ? 'links' : undefined);
+export const $lines: Foo<Line[]> = new Foo(<Line[]>[], localStorage.getItem('debugLines') ? 'lines' : undefined);
 
 export const $mouse: Foo<Coordinates> = new Foo({x:0, y:0})
 export const $scene: Foo<Coordinates> = new Foo({x:0, y:0})
