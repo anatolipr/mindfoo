@@ -135,14 +135,14 @@ export function makeShape(node: Node): string {
       return createEllipsePath(
         node.x , 
         node.y ,
-        node.width / 2, 
+        node.width / 2 + 10, 
         node.height / 2
        )
     case  NodeType.rhombus: 
       return generateRhombusPath(
         node.x , 
         node.y ,
-        node.width + 20, 
+        node.width + 50, 
         node.height + 20
        )
     case  NodeType.parallelogram:
