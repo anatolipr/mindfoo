@@ -373,26 +373,31 @@ export function mouseup(e: MouseEvent) {
 
 export function mousemove(e: MouseEvent) {
 
-    $mouse.set({
-        x: e.clientX,
-        y: e.clientY
-    })
-
-    const selection = $selection.get();
-    const moving = $moving.get();
-    if(selection.length === 0 || !moving) return
-
-    $nodes.update(nodes0 => {
-
-        selection.forEach((i) => {
-            nodes0[i].x += e.movementX;
-            nodes0[i].y += e.movementY;
+    requestAnimationFrame(() => {
+        
+        $mouse.set({
+            x: e.clientX,
+            y: e.clientY
         })
+    
+        const selection = $selection.get();
+        const moving = $moving.get();
+        if(selection.length === 0 || !moving) return
+    
+        $nodes.update(nodes0 => {
+    
+            selection.forEach((i) => {
+                nodes0[i].x += e.movementX;
+                nodes0[i].y += e.movementY;
+            })
+    
+            return nodes0;
+        })
+        
+        makeLines()
 
-        return nodes0;
     })
     
-    makeLines()
 
 }
 
