@@ -179,7 +179,7 @@ export function resize(i: number, doLines: boolean = false) {
     }
 }
 
-function makeLines(): void {
+export function makeLines(): void {
 
     const links: Link[] = $links.get()
     const nodes = $nodeMap.get();
@@ -234,7 +234,7 @@ function makeLines(): void {
 }
 
 
-function makeNodesMap(nodes0: Node[]): void {
+export function makeNodesMap(nodes0: Node[]): void {
 
     const rv: {[key: string | number]: Node} = {};
 
