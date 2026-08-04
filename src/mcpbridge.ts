@@ -29,11 +29,13 @@ import {
 	colorChange,
 	makeNodesMap,
 	makeLines,
+	resize,
 } from './data/store';
 import { $theme as theme, toggleTheme } from './data/theme';
 import type { Link, Node, NodeId } from './data/types';
 import { UNSELECTED, DEFAULT_NODE_FONT_SIZE, DEFAULT_NODE_TYPE, DEFAULT_WIDTH, DEFAULT_DASH } from './data/types';
 import { nanoid } from 'nanoid';
+import { tick } from 'svelte';
 
 // Manifest-level context surfaced once via the `describe_tools` tool a
 // js-bridge-mcp-style server registers automatically for every tenant - not
@@ -48,9 +50,11 @@ const MOCK_WORKFLOW_NOTE =
 	'(or the whole delta) yourself, then call get_document once for current state and set_document ' +
 	'once with the complete {nodes, links} you want to exist afterward - never call set_document once ' +
 	'per node/link. ' +
-	'GOTCHAS: (1) node "x"/"y" are the CENTER, not top-left, and "width"/"height" are recomputed from ' +
-	'live DOM measurement on render, so values you write are only a temporary hint - use "minWidth"/' +
-	'"minHeight" to force a floor instead of fighting that. (2) links reference nodes by "id" (never ' +
+	'GOTCHAS: (1) node "x"/"y" are the CENTER, not top-left, and "width"/"height" are a read-only DOM-' +
+	'measurement cache - set_document ignores any "width"/"height" you pass and always starts new/' +
+	'replaced nodes at the same placeholder size, which is then corrected by the live measurement pass ' +
+	'right after render; use "minWidth"/"minHeight" instead to force a floor size, since those ARE ' +
+	'respected. (2) links reference nodes by "id" (never ' +
 	'array index, which is incidental) - a link whose "one"/"two" does not match a node "id" in the ' +
 	'same set_document call is silently unrenderable, so always include both endpoint nodes and the ' +
 	'link together. (3) a link with no explicit "direction" defaults to "none" (a plain unarrowed ' +
@@ -66,8 +70,10 @@ const MOCK_WORKFLOW_NOTE =
 	MOCK_WORKFLOW_NOTE +
 	' EXACT NODE SHAPE: {"id": string|number, unique, referenced by links - keep an existing node\'s ' +
 	'id unchanged, "x"/"y": numbers, CENTER in canvas coordinates (canvas panning is a separate scene ' +
-	'offset, see get_scene/set_scene), "width"/"height": numbers in px, auto-recomputed on render, ' +
-	'"minWidth"/"minHeight": numbers, 0 = no minimum, "color": CSS color string or "" for theme ' +
+	'offset, see get_scene/set_scene), "width"/"height": read-only, DO NOT SET - a DOM-measurement ' +
+	'cache that set_document ignores on input and always recomputes after render; do not echo back ' +
+	'values read from get_document, "minWidth"/"minHeight": numbers, 0 = no minimum, use these to force ' +
+	'a floor size instead, "color": CSS color string or "" for theme ' +
 	'default, "text": inner HTML shown in the node (plain text is always safe), "size": one of ' +
 	'"15px"|"20px"|"25px"|"30px", "type": 0=roundrect, 1=rect, 2=circle, 3=ellipse, 4=rhombus, ' +
 	'5=parallelogram - use rotate_node_type on a selection to cycle these rather than hand-guessing ' +
@@ -143,13 +149,27 @@ function setTheme({ theme: t }: { theme: string }): string {
 // add() in data/store.ts) - an agent-authored node array skips that
 // function entirely (no DOM measurement pass), so this is the only place
 // those defaults get applied for bridge-authored nodes.
+//
+// "width"/"height" are intentionally NOT accepted from the agent-supplied
+// node here, even if present on the input: they are purely a cache of a
+// live DOM measurement (see App.svelte's bind:clientWidth/clientHeight),
+// never used to set the rendered box's actual CSS size (that's driven by
+// content + minWidth/minHeight), and get overwritten by the
+// ResizeObserver-driven ~measurement pass on next render regardless. An
+// agent echoing back a stale measured value from an earlier get_document
+// (rather than the generic 140/140 default) made some bridge-authored
+// nodes look inconsistently sized next to freshly-created ones - always
+// start every bridge-authored node from the same 140/140 placeholder so
+// they behave identically until measured. Agents that want to force a
+// floor size should use "minWidth"/"minHeight" instead, which the UI does
+// render as CSS min-width/min-height.
 function fillNodeDefaults(n: Partial<Node>): Node {
 	return {
 		id: n.id ?? nanoid(5),
 		x: n.x ?? 0,
 		y: n.y ?? 0,
-		width: n.width ?? 140,
-		height: n.height ?? 140,
+		width: 140,
+		height: 140,
 		minWidth: n.minWidth ?? 0,
 		minHeight: n.minHeight ?? 0,
 		color: n.color ?? '',
@@ -174,7 +194,7 @@ function fillLinkDefaults(l: Partial<Link>): Link {
 	};
 }
 
-function setDocument({ documentJson }: { documentJson: string }): string {
+async function setDocument({ documentJson }: { documentJson: string }): Promise<string> {
 	let parsed: { nodes: Partial<Node>[]; links: Partial<Link>[] } = JSON.parse(documentJson);
 	if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.links)) {
 		throw new Error('documentJson must be shaped like {"nodes": [...], "links": [...]} - the COMPLETE new tree, not a delta');
@@ -188,16 +208,29 @@ function setDocument({ documentJson }: { documentJson: string }): string {
 	let filledLinks = parsed.links.map(fillLinkDefaults);
 	nodes.set(filledNodes);
 	links.set(filledLinks);
-	// $lines (the actual rendered SVG paths) is derived from $nodeMap, not
-	// $nodes directly - $nodeMap is only refreshed by makeNodesMap(), and the
-	// paths themselves only recomputed by makeLines(). doImport() (the UI's
-	// own bulk-load path) calls both after writing nodes/links; without this,
-	// links written here silently don't render until some unrelated action
-	// (e.g. pressing Tab to add a node) happens to call makeLines() next.
 	makeNodesMap(filledNodes);
-	makeLines();
 	selection.set([]);
 	selectedLink.set(UNSELECTED);
+	// Every node above was just (re)written at the fillNodeDefaults 140/140
+	// placeholder size, not its real measured box size - same starting point
+	// add() uses for a freshly-created node. Line endpoints are trimmed to
+	// each node's shape outline (see makeShape() in makeLines()), keyed off
+	// node.width/height, so calling makeLines() immediately here would trim
+	// curves against the placeholder box instead of the real rendered one
+	// (visibly wrong for any node whose real size differs from 140x140,
+	// which is most of them). Mirror add()'s pattern instead: wait for
+	// Svelte to render the placeholder-sized boxes (tick()), measure every
+	// node's real box via resize() same as a user's drag/add does, THEN
+	// compute lines against the corrected sizes - the same
+	// dragged-node-recalculates-line-endpoints behavior the UI gives a
+	// human, just applied to every node in the replaced document instead of
+	// just the one being dragged.
+	await tick();
+	let nodeCount = nodes.get().length;
+	for (let i = 0; i < nodeCount; i++) {
+		resize(i);
+	}
+	makeLines();
 	return `document replaced (${filledNodes.length} nodes, ${filledLinks.length} links)`;
 }
 
@@ -315,10 +348,17 @@ function hexToRgba(hex: string): { r: number; g: number; b: number; a: number } 
 			'JSON string - a full replace, not a merge or delta, so pass the COMPLETE set of nodes and ' +
 			'links you want to exist afterward. Clears the current selection. Every link\'s "one"/"two" ' +
 			'must reference a node id present in the same "nodes" array you are passing, or this throws. ' +
-			'Missing fields are filled with sane defaults: nodes get x/y:0, width/height:140, color:"", ' +
-			'text:"", size:"15px", type:0/roundrect, minWidth/minHeight:0, and a freshly generated id if ' +
-			'omitted; links get direction:"none", dash:"", width:2 - so you only need to specify what you ' +
-			'actually care about (typically a node\'s text/x/y and a link\'s one/two/direction).',
+			'Missing fields are filled with sane defaults: nodes get x/y:0, color:"", text:"", size:"15px", ' +
+			'type:0/roundrect, minWidth/minHeight:0, and a freshly generated id if omitted - so you only ' +
+			'need to specify what you actually care about (typically a node\'s text/x/y and a link\'s ' +
+			'one/two/direction). Any "width"/"height" you pass on a node is ignored (not an error, just a ' +
+			'no-op) - every node always starts at the same placeholder size and is corrected by the live ' +
+			'DOM-measurement pass right after render; use "minWidth"/"minHeight" if you need a floor size. ' +
+			'links get direction:"none", dash:"", width:2. Resolves only once every node has been measured ' +
+			'and every link\'s curve has been recomputed against each node\'s real rendered shape/size (same ' +
+			'endpoint recalculation a human dragging a node triggers) - so by the time this call returns, ' +
+			'lines are already trimmed correctly and get_document will report accurate width/height, with ' +
+			'no separate step needed.',
 		params: { documentJson: { type: 'string', description: 'JSON-encoded {"nodes":[...],"links":[...]} - the COMPLETE new tree, see EXACT NODE/LINK SHAPE above' } },
 		example: { documentJson: '{"nodes":[{"id":"a1","text":"Root","x":0,"y":0},{"id":"a2","text":"Child","x":200,"y":0}],"links":[{"one":"a1","two":"a2","direction":"right"}]}' },
 		fn: setDocument,
