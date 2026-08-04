@@ -53,8 +53,13 @@ const MOCK_WORKFLOW_NOTE =
 	'GOTCHAS: (1) node "x"/"y" are the CENTER, not top-left, and "width"/"height" are a read-only DOM-' +
 	'measurement cache - set_document ignores any "width"/"height" you pass and always starts new/' +
 	'replaced nodes at the same placeholder size, which is then corrected by the live measurement pass ' +
-	'right after render; use "minWidth"/"minHeight" instead to force a floor size, since those ARE ' +
-	'respected. (2) links reference nodes by "id" (never ' +
+	'right after render, the same auto-sizing-to-content (incl. text wrapping) a human editing the node ' +
+	'gets. Width has a floor you may set via "minWidth", since a human can also widen a node by hand; ' +
+	'height has NO such floor and is never yours to decide - it always falls out purely from wrapping ' +
+	'the text at the node\'s width, so "minHeight" is not accepted and is always forced to 0/auto. If a ' +
+	'node reads too short or too tall, that is a text-length/minWidth problem, not a height problem - ' +
+	'wider (bigger minWidth) means shorter, narrower means taller; never try to fix it by requesting a ' +
+	'height. (2) links reference nodes by "id" (never ' +
 	'array index, which is incidental) - a link whose "one"/"two" does not match a node "id" in the ' +
 	'same set_document call is silently unrenderable, so always include both endpoint nodes and the ' +
 	'link together. (3) a link with no explicit "direction" defaults to "none" (a plain unarrowed ' +
@@ -72,8 +77,10 @@ const MOCK_WORKFLOW_NOTE =
 	'id unchanged, "x"/"y": numbers, CENTER in canvas coordinates (canvas panning is a separate scene ' +
 	'offset, see get_scene/set_scene), "width"/"height": read-only, DO NOT SET - a DOM-measurement ' +
 	'cache that set_document ignores on input and always recomputes after render; do not echo back ' +
-	'values read from get_document, "minWidth"/"minHeight": numbers, 0 = no minimum, use these to force ' +
-	'a floor size instead, "color": CSS color string or "" for theme ' +
+	'values read from get_document, "minWidth": number, 0 = no minimum, the only floor size you may ' +
+	'request - height is never settable, not even as a floor: it is always the pure result of wrapping ' +
+	'the node\'s text at its (auto or minWidth-floored) width, exactly like a human editing the node ' +
+	'gets, "color": CSS color string or "" for theme ' +
 	'default, "text": inner HTML shown in the node (plain text is always safe), "size": one of ' +
 	'"15px"|"20px"|"25px"|"30px", "type": 0=roundrect, 1=rect, 2=circle, 3=ellipse, 4=rhombus, ' +
 	'5=parallelogram - use rotate_node_type on a selection to cycle these rather than hand-guessing ' +
@@ -154,15 +161,21 @@ function setTheme({ theme: t }: { theme: string }): string {
 // node here, even if present on the input: they are purely a cache of a
 // live DOM measurement (see App.svelte's bind:clientWidth/clientHeight),
 // never used to set the rendered box's actual CSS size (that's driven by
-// content + minWidth/minHeight), and get overwritten by the
-// ResizeObserver-driven ~measurement pass on next render regardless. An
-// agent echoing back a stale measured value from an earlier get_document
-// (rather than the generic 140/140 default) made some bridge-authored
-// nodes look inconsistently sized next to freshly-created ones - always
-// start every bridge-authored node from the same 140/140 placeholder so
-// they behave identically until measured. Agents that want to force a
-// floor size should use "minWidth"/"minHeight" instead, which the UI does
-// render as CSS min-width/min-height.
+// content + minWidth, wrapped exactly like a human typing into the node
+// would), and get overwritten by the ResizeObserver-driven measurement
+// pass on next render regardless. An agent echoing back a stale measured
+// value from an earlier get_document (rather than the generic 140/140
+// default) made some bridge-authored nodes look inconsistently sized next
+// to freshly-created ones - always start every bridge-authored node from
+// the same 140/140 placeholder so they behave identically until measured.
+//
+// "minHeight" is likewise never accepted from the agent, even though the
+// Node type/UI technically support it (App.svelte does render it as CSS
+// min-height) - it is always forced to 0 here. Height must stay something
+// only text-wrap + width ever decides, the same as when a human edits a
+// node; agents that want a node "bigger" should ask for a bigger minWidth
+// (which reflows the wrapped text and changes height as a side effect),
+// never a height/minHeight directly.
 function fillNodeDefaults(n: Partial<Node>): Node {
 	return {
 		id: n.id ?? nanoid(5),
@@ -171,7 +184,7 @@ function fillNodeDefaults(n: Partial<Node>): Node {
 		width: 140,
 		height: 140,
 		minWidth: n.minWidth ?? 0,
-		minHeight: n.minHeight ?? 0,
+		minHeight: 0,
 		color: n.color ?? '',
 		text: n.text ?? '',
 		size: n.size ?? DEFAULT_NODE_FONT_SIZE,
@@ -349,11 +362,14 @@ function hexToRgba(hex: string): { r: number; g: number; b: number; a: number } 
 			'links you want to exist afterward. Clears the current selection. Every link\'s "one"/"two" ' +
 			'must reference a node id present in the same "nodes" array you are passing, or this throws. ' +
 			'Missing fields are filled with sane defaults: nodes get x/y:0, color:"", text:"", size:"15px", ' +
-			'type:0/roundrect, minWidth/minHeight:0, and a freshly generated id if omitted - so you only ' +
+			'type:0/roundrect, minWidth:0, and a freshly generated id if omitted - so you only ' +
 			'need to specify what you actually care about (typically a node\'s text/x/y and a link\'s ' +
-			'one/two/direction). Any "width"/"height" you pass on a node is ignored (not an error, just a ' +
-			'no-op) - every node always starts at the same placeholder size and is corrected by the live ' +
-			'DOM-measurement pass right after render; use "minWidth"/"minHeight" if you need a floor size. ' +
+			'one/two/direction). Any "width"/"height"/"minHeight" you pass on a node is ignored (not an ' +
+			'error, just a no-op, minHeight is always forced to 0) - every node always starts at the same ' +
+			'placeholder size and is corrected by the live DOM-measurement pass right after render, sizing ' +
+			'to content exactly like a human editing the node would; use "minWidth" if you need a floor ' +
+			'size - there is no floor for height, it is purely a function of text length wrapped at the ' +
+			'node\'s width, so never try to make a node "taller" directly. ' +
 			'links get direction:"none", dash:"", width:2. Resolves only once every node has been measured ' +
 			'and every link\'s curve has been recomputed against each node\'s real rendered shape/size (same ' +
 			'endpoint recalculation a human dragging a node triggers) - so by the time this call returns, ' +
