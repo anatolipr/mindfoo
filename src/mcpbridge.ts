@@ -54,8 +54,10 @@ const MOCK_WORKFLOW_NOTE =
 	'measurement cache - set_document ignores any "width"/"height" you pass and always starts new/' +
 	'replaced nodes at the same placeholder size, which is then corrected by the live measurement pass ' +
 	'right after render, the same auto-sizing-to-content (incl. text wrapping) a human editing the node ' +
-	'gets. Width has a floor you may set via "minWidth", since a human can also widen a node by hand; ' +
-	'height has NO such floor and is never yours to decide - it always falls out purely from wrapping ' +
+	'gets. Width has a floor you may set via "minWidth" and a ceiling via "maxWidth" (default 300), ' +
+	'since a human can also drag a node\'s right edge to change its ceiling by hand - text longer than ' +
+	'"maxWidth" wraps instead of growing the node wider; height has NO such floor and is never yours ' +
+	'to decide - it always falls out purely from wrapping ' +
 	'the text at the node\'s width, so "minHeight" is not accepted and is always forced to 0/auto. If a ' +
 	'node reads too short or too tall, that is a text-length/minWidth problem, not a height problem - ' +
 	'wider (bigger minWidth) means shorter, narrower means taller; never try to fix it by requesting a ' +
@@ -78,9 +80,11 @@ const MOCK_WORKFLOW_NOTE =
 	'offset, see get_scene/set_scene), "width"/"height": read-only, DO NOT SET - a DOM-measurement ' +
 	'cache that set_document ignores on input and always recomputes after render; do not echo back ' +
 	'values read from get_document, "minWidth": number, 0 = no minimum, the only floor size you may ' +
-	'request - height is never settable, not even as a floor: it is always the pure result of wrapping ' +
-	'the node\'s text at its (auto or minWidth-floored) width, exactly like a human editing the node ' +
-	'gets, "color": CSS color string or "" for theme ' +
+	'request, "maxWidth": number, default 300, the ceiling before text wraps instead of widening the ' +
+	'node (same value a human sets by dragging the node\'s right edge) - height is never settable, not ' +
+	'even as a floor: it is always the pure result of wrapping ' +
+	'the node\'s text at its (auto, minWidth-floored, or maxWidth-capped) width, exactly like a human ' +
+	'editing the node gets, "color": CSS color string or "" for theme ' +
 	'default, "text": inner HTML shown in the node (plain text is always safe), "size": one of ' +
 	'"15px"|"20px"|"25px"|"30px", "type": 0=roundrect, 1=rect, 2=circle, 3=ellipse, 4=rhombus, ' +
 	'5=parallelogram - use rotate_node_type on a selection to cycle these rather than hand-guessing ' +
@@ -184,6 +188,7 @@ function fillNodeDefaults(n: Partial<Node>): Node {
 		width: 140,
 		height: 140,
 		minWidth: n.minWidth ?? 0,
+		maxWidth: n.maxWidth ?? 300,
 		minHeight: 0,
 		color: n.color ?? '',
 		text: n.text ?? '',
@@ -244,6 +249,20 @@ async function setDocument({ documentJson }: { documentJson: string }): Promise<
 		resize(i);
 	}
 	makeLines();
+	// resize() (and the app's own bind:clientWidth/clientHeight) mutate each
+	// node's width/height IN PLACE on the array already held by the $nodes
+	// Foo store, without calling Foo#set() - so nothing has actually
+	// re-published to $nodes' subscribers yet, even though the underlying
+	// data is now correct. The interactive add() path (see store.ts) never
+	// hits this because it always follows up with $nodes.update(...), which
+	// republishes the WHOLE list and makes Svelte's {#each $nodes} block
+	// rerun makeShape(node) for every node - that republish, not the
+	// measurement itself, is what actually repaints the SVG shapes at their
+	// correct size. Skipping this call is exactly what made bridge-authored
+	// diagrams render with stale/placeholder-ish shapes until some unrelated
+	// interaction (e.g. adding a node) finally triggered a real $nodes
+	// publish and repainted everything at once.
+	nodes.set(nodes.get());
 	return `document replaced (${filledNodes.length} nodes, ${filledLinks.length} links)`;
 }
 
@@ -362,7 +381,7 @@ function hexToRgba(hex: string): { r: number; g: number; b: number; a: number } 
 			'links you want to exist afterward. Clears the current selection. Every link\'s "one"/"two" ' +
 			'must reference a node id present in the same "nodes" array you are passing, or this throws. ' +
 			'Missing fields are filled with sane defaults: nodes get x/y:0, color:"", text:"", size:"15px", ' +
-			'type:0/roundrect, minWidth:0, and a freshly generated id if omitted - so you only ' +
+			'type:0/roundrect, minWidth:0, maxWidth:300, and a freshly generated id if omitted - so you only ' +
 			'need to specify what you actually care about (typically a node\'s text/x/y and a link\'s ' +
 			'one/two/direction). Any "width"/"height"/"minHeight" you pass on a node is ignored (not an ' +
 			'error, just a no-op, minHeight is always forced to 0) - every node always starts at the same ' +

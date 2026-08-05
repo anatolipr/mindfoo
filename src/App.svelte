@@ -17,10 +17,12 @@
         $mouse as mouse,
 		$selecting as selecting,
 		$menu as menu,
+        $resizingWidth as resizingWidth,
         lineClick,
         lineDelete,
         resize,
         selectNode,
+        startResizeWidth,
         colorChange,
         doImport,
         doExport,
@@ -144,8 +146,9 @@
 					font-size: {node.size};
 					{node.minHeight > 0 ? `min-height:${node.minHeight}px;`:''}
 					{node.minWidth > 0 ? `min-width:${node.minWidth}px;`:''}
+					{node.maxWidth ? `width: max-content; max-width:${node.maxWidth}px; white-space: normal; overflow-wrap: break-word;`:''}
 					color: {node.color ? getContrastColor(node.color) : 'auto'};
-					pointer-events: {$editing  ? 'auto!important':'none'} 
+					pointer-events: {$editing  ? 'auto!important':'none'}
 				   "
 			 on:input={() => resize(i, true)}
 			 bind:clientWidth={node.width}
@@ -160,6 +163,12 @@
 				></div>
 			{:else}
 				<div role="none">{@html node.text}</div>
+			{/if}
+			{#if node.maxWidth && ($selection.indexOf(i) > -1 || $resizingWidth === i)}
+				<div role="none" class="resize-handle"
+					 style="pointer-events: auto;"
+					 on:mousedown|stopPropagation|preventDefault={(e) => startResizeWidth(i, e)}
+				></div>
 			{/if}
 		</div>
 	{/each}
@@ -240,6 +249,16 @@
 
 	.item div {
 		text-align: center;
+	}
+
+	.resize-handle {
+		position: absolute;
+		top: 0;
+		right: -6px;
+		width: 10px;
+		height: 100%;
+		cursor: ew-resize;
+		background: transparent;
 	}
 
 	.selected {

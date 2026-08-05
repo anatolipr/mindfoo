@@ -23,6 +23,7 @@ export const $scene: Foo<Coordinates> = new Foo({x:0, y:0})
 export const $selectionStart: Foo<Coordinates> = new Foo({x: 0, y: 0});
 
 export const $moving: Foo<boolean> = new Foo(false);
+export const $resizingWidth: Foo<number> = new Foo(UNSELECTED as number);
 export const $editing: Foo<boolean> = new Foo(false);
 
 export const $selection: Foo<number[]> = new Foo(<number[]>[], "selection");
@@ -137,6 +138,7 @@ export async function add() {
                 text: 'Enter',
                 minHeight: 0,
                 minWidth: 0,
+                maxWidth: 300,
                 color: '',
                 size: DEFAULT_NODE_FONT_SIZE,
                 type: DEFAULT_NODE_TYPE
@@ -326,7 +328,15 @@ export function addLink(one: NodeId, two: NodeId): void {
 
 }
 
+const MIN_MAX_WIDTH = 60;
+
+export function startResizeWidth(i: number, e: MouseEvent) {
+    $resizingWidth.set(i);
+}
+
 export function mouseup(e: MouseEvent) {
+    $resizingWidth.set(UNSELECTED);
+
     if ($selecting.get()) {
         $previousSelection.set($selection.get());
         
@@ -379,21 +389,32 @@ export function mousemove(e: MouseEvent) {
             x: e.clientX,
             y: e.clientY
         })
-    
+
+        const resizingWidth = $resizingWidth.get();
+        if (resizingWidth !== UNSELECTED) {
+            $nodes.update(nodes0 => {
+                const node = nodes0[resizingWidth];
+                node.maxWidth = Math.max(MIN_MAX_WIDTH, (node.maxWidth ?? node.width) + e.movementX);
+                return nodes0;
+            })
+            resize(resizingWidth, true);
+            return
+        }
+
         const selection = $selection.get();
         const moving = $moving.get();
         if(selection.length === 0 || !moving) return
-    
+
         $nodes.update(nodes0 => {
-    
+
             selection.forEach((i) => {
                 nodes0[i].x += e.movementX;
                 nodes0[i].y += e.movementY;
             })
-    
+
             return nodes0;
         })
-        
+
         makeLines()
 
     })

@@ -19,6 +19,7 @@ export type Node = {
     id:     NodeId,
     width:  number,
     minWidth:  number,
+    maxWidth?: number,
     height:     number,
     minHeight: number,
     x:      number,
