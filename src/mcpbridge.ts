@@ -36,6 +36,7 @@ import type { Link, Node, NodeId } from './data/types';
 import { UNSELECTED, DEFAULT_NODE_FONT_SIZE, DEFAULT_NODE_TYPE, DEFAULT_WIDTH, DEFAULT_DASH } from './data/types';
 import { nanoid } from 'nanoid';
 import { tick } from 'svelte';
+import { assertValidNodes, assertValidLinks } from './data/dataSchema';
 
 // Manifest-level context surfaced once via the `describe_tools` tool a
 // js-bridge-mcp-style server registers automatically for every tenant - not
@@ -217,6 +218,8 @@ async function setDocument({ documentJson }: { documentJson: string }): Promise<
 	if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.links)) {
 		throw new Error('documentJson must be shaped like {"nodes": [...], "links": [...]} - the COMPLETE new tree, not a delta');
 	}
+	assertValidNodes(parsed.nodes);
+	assertValidLinks(parsed.links);
 	let filledNodes = parsed.nodes.map(fillNodeDefaults);
 	let ids = new Set(filledNodes.map((n) => n.id));
 	for (let l of parsed.links) {

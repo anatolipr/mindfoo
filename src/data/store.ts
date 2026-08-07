@@ -225,7 +225,9 @@ export function makeLines(): void {
         }
 
         lines.push(
-                {	id: node1.id + '-' + node2.id,
+                {	// include index: node1/node2 order alone collides when
+                    // multiple links connect the same pair of nodes (e.g. a loop-back link)
+                    id: node1.id + '-' + node2.id + '-' + i,
                     c: makeCurve(c),
                     reverse,
                 }
