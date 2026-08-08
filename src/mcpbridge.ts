@@ -45,12 +45,14 @@ const MOCK_WORKFLOW_NOTE =
 	'Context: mindfoo (aka "arrows") is a freeform visual mind-mapping / diagramming tool. A diagram ' +
 	'is "nodes" (shapes: roundrect/rect/circle/ellipse/rhombus/parallelogram, holding text/color/font ' +
 	'size, positioned by an x/y CENTER point, not top-left) PLUS "links" (curved connector lines ' +
-	'between two node ids, each independently stylable as a plain line or an arrow). Reading/writing ' +
-	'the whole tree is exactly two tools: get_document and set_document - there is no per-node/per-' +
-	'link add/update/delete and no separate node-only or link-only read/write. Plan the whole diagram ' +
-	'(or the whole delta) yourself, then call get_document once for current state and set_document ' +
-	'once with the complete {nodes, links} you want to exist afterward - never call set_document once ' +
-	'per node/link. ' +
+	'between two node ids, each independently stylable as a plain line or an arrow). get_document/' +
+	'set_document read/write the WHOLE tree (nodes + links together) and are for structural changes - ' +
+	'building a new diagram, adding/removing nodes or links. For a small edit to ONE node that already ' +
+	'exists (recolor it, change its text, nudge x/y, resize via minWidth/maxWidth) use get_node/' +
+	'patch_node instead - they address a single node by "id" and are far cheaper than resending the ' +
+	'whole document for a one-field change; never call set_document just to change one field on one ' +
+	'existing node. There is still no per-link update tool - a link change requires set_document with ' +
+	'the complete links array. ' +
 	'GOTCHAS: (1) node "x"/"y" are the CENTER, not top-left, and "width"/"height" are a read-only DOM-' +
 	'measurement cache - set_document ignores any "width"/"height" you pass and always starts new/' +
 	'replaced nodes at the same placeholder size, which is then corrected by the live measurement pass ' +
@@ -117,6 +119,72 @@ function readSelection(): string {
 
 function findNodeIndex(allNodes: Node[], id: NodeId): number {
 	return allNodes.findIndex((n) => n.id === id);
+}
+
+// Reads back a SINGLE node by id instead of the whole document - lets an
+// agent that already has get_document's output in context re-check or
+// re-fetch just the one node it's about to patch, without paying for
+// nodes+links again.
+function getNode({ id }: { id: string }): string {
+	let idx = findNodeIndex(nodes.get(), id);
+	if (idx === -1) throw new Error(`no node with id "${id}" - call get_document for current ids`);
+	return JSON.stringify(nodes.get()[idx]);
+}
+
+// Surgical single-node update: merges the given fields into the node with
+// the given id instead of requiring the agent to resend the ENTIRE
+// {nodes, links} document (via set_document) for a small change like
+// recoloring one node or fixing a typo in its text. Shallow merge only -
+// "id" cannot be changed (links reference it) and "width"/"height" cannot
+// be set directly (see fillNodeDefaults' comment - they're a DOM-
+// measurement cache), same restriction set_document already applies via
+// fillNodeDefaults dropping them.
+async function patchNode({ id, fieldsJson }: { id: string; fieldsJson: string }): Promise<string> {
+	let fields: Partial<Node> = JSON.parse(fieldsJson);
+	if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) {
+		throw new Error('fieldsJson must be a JSON object of {fieldName: newValue} pairs to merge, e.g. {"color":"#3498db"}');
+	}
+	if ('id' in fields) {
+		throw new Error('patch_node cannot change "id" - links reference it by id; if you need a ' +
+			'differently-identified node, create a new one via set_document instead');
+	}
+	if ('width' in fields || 'height' in fields) {
+		throw new Error('patch_node cannot set "width"/"height" directly - they are a read-only DOM-' +
+			'measurement cache recomputed after render, exactly like set_document ignores them on input; ' +
+			'use "minWidth"/"maxWidth" to influence size instead (see EXACT NODE SHAPE above)');
+	}
+
+	let allNodes = nodes.get();
+	let idx = findNodeIndex(allNodes, id);
+	if (idx === -1) throw new Error(`no node with id "${id}" - call get_document for current ids`);
+
+	let merged = { ...allNodes[idx], ...fields };
+	// assertValidNodes checks against the AGENT-INPUT schema (dataSchema.ts),
+	// which deliberately excludes "width"/"height"/"minHeight" - they're a
+	// live DOM-measurement cache that's always present on an existing node
+	// but never valid as agent-authored input (see fillNodeDefaults' comment
+	// in setDocument). Validating `merged` directly would reject every
+	// patch_node call, on every node, regardless of what fields were
+	// actually passed in, since those cache fields ride along from
+	// allNodes[idx] above. Validate a copy with them stripped instead; they
+	// aren't touched by this function (blocked above) so they carry over
+	// into the written node unchanged either way.
+	let { width, height, minHeight, ...toValidate } = merged;
+	assertValidNodes([toValidate]);
+	allNodes[idx] = merged;
+	nodes.set(allNodes);
+	makeNodesMap(allNodes);
+
+	// Only "x"/"y" (position) affect link curve endpoints - other fields
+	// (color/text/size/type/minWidth/maxWidth) can change the node's
+	// measured width/height too (text length, font size), so always
+	// re-measure via resize() the same way set_document does for every
+	// node, then recompute lines - cheap for a single node, unlike
+	// set_document's full-document pass.
+	await tick();
+	resize(idx, true);
+
+	return JSON.stringify(merged);
 }
 
 function findLinkIndex(allLinks: Link[], one: NodeId, two: NodeId): number {
@@ -373,15 +441,52 @@ function hexToRgba(hex: string): { r: number; g: number; b: number; a: number } 
 		description: `${MOCK_WORKFLOW_NOTE} Returns the WHOLE diagram as {"nodes":[...], "links":[...]} ` +
 			'- the single read tool for the tree, covering nodes and links together (same shape a human ' +
 			'gets from "export" in the UI, minus the file-save step, and the same shape set_document ' +
-			'expects back). Call this once to see current state before planning any change.',
+			'expects back). Call this once to see current state before planning any change. ' +
+			'PREFER get_node OVER THIS when you already know a specific node id (e.g. still in context from ' +
+			'an earlier get_document, or from get_selection) and just want to re-check its current fields.',
 		params: {},
 		fn: readDocument,
+	},
+	{
+		name: 'get_node',
+		description: `${MOCK_WORKFLOW_NOTE} Returns a SINGLE node by "id", in the same shape get_document's ` +
+			'"nodes" array uses. Use instead of get_document when you already know which one node you want ' +
+			'to inspect - e.g. right before patch_node, to confirm current values without re-fetching the ' +
+			'whole {nodes, links} document. Throws if no node has that id (call get_document for current ids).',
+		params: { id: { type: 'string', description: 'The node\'s id' } },
+		example: { id: 'a1' },
+		fn: getNode,
+	},
+	{
+		name: 'patch_node',
+		description: `${MOCK_WORKFLOW_NOTE} SURGICAL SINGLE-NODE UPDATE - PREFER THIS over set_document for ` +
+			'a small, targeted edit to a node that already exists (recolor it, change its text, nudge its ' +
+			'x/y, change minWidth/maxWidth/size/type). Merges only the fields you pass (e.g. ' +
+			'{"color":"#3498db"}) into the existing node with the given id - fields you omit are left ' +
+			'untouched. Cannot change "id" (links reference it - create a new node via set_document if you ' +
+			'need one) or set "width"/"height" directly (same read-only DOM-measurement-cache restriction ' +
+			'set_document applies - use "minWidth"/"maxWidth" instead). Much cheaper than get_document + ' +
+			'hand-edit + set_document: you never need to hold or resend the WHOLE {nodes, links} document ' +
+			'(including every other node and every link) just to change one field on one node, and it ' +
+			'cannot accidentally drop/corrupt an unrelated node or link. Resolves only once the patched ' +
+			'node has been re-measured and any connected links\' curves recomputed against its real ' +
+			'rendered size/position (same as set_document, just scoped to the one node), so ' +
+			'get_document/get_node will report accurate width/height immediately after this returns.',
+		params: {
+			id: { type: 'string', description: 'The node\'s id' },
+			fieldsJson: { type: 'string', description: 'JSON object of {fieldName: newValue} pairs to merge into the node, e.g. {"color":"#3498db"}' },
+		},
+		example: { id: 'a1', fieldsJson: '{"color":"#3498db"}' },
+		fn: patchNode,
 	},
 	{
 		name: 'set_document',
 		description: `${MOCK_WORKFLOW_NOTE} Replaces the WHOLE diagram from a {"nodes":[...],"links":[...]} ` +
 			'JSON string - a full replace, not a merge or delta, so pass the COMPLETE set of nodes and ' +
-			'links you want to exist afterward. Clears the current selection. Every link\'s "one"/"two" ' +
+			'links you want to exist afterward. Use this for STRUCTURAL changes (add/remove nodes or links, ' +
+			'build a new diagram from scratch); IF YOU ARE ONLY CHANGING A FEW FIELDS ON A NODE THAT ALREADY ' +
+			'EXISTS, use patch_node INSTEAD - it is cheaper and cannot disturb unrelated nodes/links. ' +
+			'Clears the current selection. Every link\'s "one"/"two" ' +
 			'must reference a node id present in the same "nodes" array you are passing, or this throws. ' +
 			'Missing fields are filled with sane defaults: nodes get x/y:0, color:"", text:"", size:"15px", ' +
 			'type:0/roundrect, minWidth:0, maxWidth:300, and a freshly generated id if omitted - so you only ' +
