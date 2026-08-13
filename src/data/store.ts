@@ -13,6 +13,7 @@ import { readFile, saveFile } from 'avos/src/util';
 import { rgbAsHex, selectText } from '../util';
 import { nextDash, nextWidth } from './properties/linkPropertiesHelper';
 import { nextNodeSize, nextNodeType } from './properties/nodePropertiesHelper';
+import { exportToServer, importFromServer } from './remote';
 
 export const $nodes: Foo<Node[]> = new Foo(<Node[]>[], localStorage.getItem('debugNodes') ? 'nodes' : undefined);
 export const $links: Foo<Link[]> = new Foo(<Link[]>[], localStorage.getItem('debugLinks') ? 'links' : undefined);
@@ -45,6 +46,12 @@ export function init() {
     makeLines();
 
     document.addEventListener('keydown', keydown);
+
+    const hash = window.location.hash.substring(1);
+    if (hash) {
+        loadFromServer(hash);
+    }
+
     return () => {
         document.removeEventListener('keydown', keydown)
     }
@@ -615,30 +622,59 @@ export function doExport() {
 export async function doImport() {
     const content: string = await readFile();
     if (content) {
+        applyImportedContent(content, 'invalid format');
+    }
+}
 
-        const parsed: {nodes: Node[], links: Link[]} = JSON.parse(content);
+function applyImportedContent(content: string, invalidMessage: string): boolean {
+    let parsed: {nodes: Node[], links: Link[]};
+    try {
+        parsed = JSON.parse(content);
+    } catch (e) {
+        alert(invalidMessage);
+        return false;
+    }
 
-        if ( ! parsed.hasOwnProperty('links') ) {
-            alert('invalid format: 1')
-            return;
-        }
+    if ( ! parsed.hasOwnProperty('links') ) {
+        alert(invalidMessage + ': 1')
+        return false;
+    }
 
-        if (! parsed.hasOwnProperty('nodes')) {
-            alert('invalid format: 2')
-            return;
-        }
-        
-        
-        
-        $nodes.set([...parsed.nodes]);
-        $links.set([...parsed.links]);
+    if (! parsed.hasOwnProperty('nodes')) {
+        alert(invalidMessage + ': 2')
+        return false;
+    }
 
-        makeNodesMap($nodes.get());
+    $nodes.set([...parsed.nodes]);
+    $links.set([...parsed.links]);
 
-        $selection.set([])
-        
-        //?
-        makeLines();
+    makeNodesMap($nodes.get());
+
+    $selection.set([])
+
+    makeLines();
+    return true;
+}
+
+export function doExportToServer(): void {
+    exportToServer(JSON.stringify({
+        nodes: $nodes.get(), links: $links.get()
+    }));
+}
+
+export async function doImportFromServer(): Promise<void> {
+    const content = await importFromServer();
+    if (!content) {
+        alert('empty response');
+        return;
+    }
+    applyImportedContent(content, 'invalid format');
+}
+
+async function loadFromServer(name: string): Promise<void> {
+    const content = await importFromServer(name);
+    if (content) {
+        applyImportedContent(content, 'invalid format');
     }
 }
 
@@ -653,6 +689,12 @@ export function move(cProp: string, delta: number): void {
 }
 
 async function keydown(e: KeyboardEvent): Promise<void> {
+
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        doExportToServer();
+        return;
+    }
 
     if (e.metaKey && e.code === 'KeyA') {
         $selection.update(selection => {

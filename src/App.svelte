@@ -26,6 +26,8 @@
         colorChange,
         doImport,
         doExport,
+        doImportFromServer,
+        doExportToServer,
         bodyMouseDown,
         mousemove,
         mouseup,
@@ -195,6 +197,8 @@
 	{/if}
 	<button on:click="{doExport}">export</button>
 	<button on:click="{doImport}">import</button>
+	<button on:click="{doExportToServer}">save to server</button>
+	<button on:click="{doImportFromServer}">load from server</button>
 	{#if $selectedLink > -1}
 		<button on:click="{lineText}">line text</button>
 		<button on:click="{rotateArrows}">arrows</button>
