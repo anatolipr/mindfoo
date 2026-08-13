@@ -615,19 +615,19 @@ export function doExport() {
         return
     }
     saveFile(JSON.stringify({
-        nodes: $nodes.get(), links: $links.get()
+        nodes: $nodes.get(), links: $links.get(), scene: $scene.get()
     }), (fname || 'untitled') + '.arrows')
 }
 
 export async function doImport() {
     const content: string = await readFile();
     if (content) {
-        applyImportedContent(content, 'invalid format');
+        loadContent(content, 'invalid format');
     }
 }
 
 function applyImportedContent(content: string, invalidMessage: string): boolean {
-    let parsed: {nodes: Node[], links: Link[]};
+    let parsed: {nodes: Node[], links: Link[], scene?: {x: number, y: number}};
     try {
         parsed = JSON.parse(content);
     } catch (e) {
@@ -645,6 +645,10 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
         return false;
     }
 
+    if (parsed.scene && typeof parsed.scene === 'object' &&
+        typeof parsed.scene.x === 'number' && typeof parsed.scene.y === 'number') {
+        $scene.set({ x: parsed.scene.x, y: parsed.scene.y });
+    }
     $nodes.set([...parsed.nodes]);
     $links.set([...parsed.links]);
 
@@ -656,9 +660,114 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
     return true;
 }
 
+type ParsedDocument = {nodes: Node[], links: Link[], scene?: {x: number, y: number}};
+
+function normalizeNode(node: Node) {
+    return {
+        id: node.id,
+        x: node.x,
+        y: node.y,
+        minWidth: node.minWidth,
+        maxWidth: node.maxWidth,
+        color: node.color,
+        text: node.text,
+        size: node.size,
+        type: node.type,
+    };
+}
+
+function normalizeLink(link: Link) {
+    return {
+        one: link.one,
+        two: link.two,
+        direction: link.direction,
+        dash: link.dash,
+        width: link.width,
+        color: link.color ?? null,
+        text: link.text ?? null,
+    };
+}
+
+function canonicalSnapshot(nodes: Node[], links: Link[], scene: Coordinates): string {
+    const normalizedNodes = nodes
+        .map(normalizeNode)
+        .sort((one, two) => String(one.id).localeCompare(String(two.id)));
+
+    const normalizedLinks = links
+        .map(normalizeLink)
+        .sort((one, two) => JSON.stringify(one).localeCompare(JSON.stringify(two)));
+
+    return JSON.stringify({
+        nodes: normalizedNodes,
+        links: normalizedLinks,
+        scene: { x: scene.x, y: scene.y },
+    });
+}
+
+function parseDocument(content: string, invalidMessage: string): ParsedDocument | null {
+    let parsed: ParsedDocument;
+    try {
+        parsed = JSON.parse(content);
+    } catch (e) {
+        alert(invalidMessage);
+        return null;
+    }
+
+    if (!parsed || !parsed.hasOwnProperty('links')) {
+        alert(invalidMessage + ': 1')
+        return null;
+    }
+
+    if (!parsed.hasOwnProperty('nodes')) {
+        alert(invalidMessage + ': 2')
+        return null;
+    }
+
+    if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.links)) {
+        alert(invalidMessage + ': 3')
+        return null;
+    }
+
+    return parsed;
+}
+
+function effectiveScene(parsed: ParsedDocument): Coordinates {
+    if (parsed.scene && typeof parsed.scene === 'object' &&
+        typeof parsed.scene.x === 'number' && typeof parsed.scene.y === 'number') {
+        return { x: parsed.scene.x, y: parsed.scene.y };
+    }
+    return $scene.get();
+}
+
+function loadContent(content: string, invalidMessage: string): boolean {
+    const parsed = parseDocument(content, invalidMessage);
+    if (!parsed) return false;
+
+    const currentNodes = $nodes.get();
+    const currentLinks = $links.get();
+    const currentScene = $scene.get();
+
+    const incomingScene = effectiveScene(parsed);
+    const currentIsEmpty = currentNodes.length === 0 && currentLinks.length === 0;
+    const differs = canonicalSnapshot(currentNodes, currentLinks, currentScene) !==
+        canonicalSnapshot(parsed.nodes, parsed.links, incomingScene);
+
+    if (!currentIsEmpty && differs) {
+        const message =
+            `Replace the current diagram (${currentNodes.length} nodes, ${currentLinks.length} links) ` +
+            `with the loaded one (${parsed.nodes.length} nodes, ${parsed.links.length} links)?\n\n` +
+            `OK = replace, Cancel = keep current diagram.`;
+        if (!confirm(message)) {
+            return false;
+        }
+    }
+
+    return applyImportedContent(content, invalidMessage);
+}
+
 export function doExportToServer(): void {
     exportToServer(JSON.stringify({
-        nodes: $nodes.get(), links: $links.get()
+        nodes: $nodes.get(), links: $links.get(), scene: $scene.get()
     }));
 }
 
@@ -668,13 +777,13 @@ export async function doImportFromServer(): Promise<void> {
         alert('empty response');
         return;
     }
-    applyImportedContent(content, 'invalid format');
+    loadContent(content, 'invalid format');
 }
 
 async function loadFromServer(name: string): Promise<void> {
     const content = await importFromServer(name);
     if (content) {
-        applyImportedContent(content, 'invalid format');
+        loadContent(content, 'invalid format');
     }
 }
 
