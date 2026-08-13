@@ -38,68 +38,174 @@ import { nanoid } from 'nanoid';
 import { tick } from 'svelte';
 import { assertValidNodes, assertValidLinks } from './data/dataSchema';
 
-// Manifest-level context surfaced once via the `describe_tools` tool a
-// js-bridge-mcp-style server registers automatically for every tenant - not
-// repeated into each individual tool description below.
-const MOCK_WORKFLOW_NOTE =
-	'Context: mindfoo (aka "arrows") is a freeform visual mind-mapping / diagramming tool. A diagram ' +
-	'is "nodes" (shapes: roundrect/rect/circle/ellipse/rhombus/parallelogram, holding text/color/font ' +
-	'size, positioned by an x/y CENTER point, not top-left) PLUS "links" (curved connector lines ' +
-	'between two node ids, each independently stylable as a plain line or an arrow). get_document/' +
-	'set_document read/write the WHOLE tree (nodes + links together) and are for structural changes - ' +
-	'building a new diagram, adding/removing nodes or links. For a small edit to ONE node that already ' +
-	'exists (recolor it, change its text, nudge x/y, resize via minWidth/maxWidth) use get_node/' +
-	'patch_node instead - they address a single node by "id" and are far cheaper than resending the ' +
-	'whole document for a one-field change; never call set_document just to change one field on one ' +
-	'existing node. There is still no per-link update tool - a link change requires set_document with ' +
-	'the complete links array. ' +
-	'GOTCHAS: (1) node "x"/"y" are the CENTER, not top-left, and "width"/"height" are a read-only DOM-' +
-	'measurement cache - set_document ignores any "width"/"height" you pass and always starts new/' +
-	'replaced nodes at the same placeholder size, which is then corrected by the live measurement pass ' +
-	'right after render, the same auto-sizing-to-content (incl. text wrapping) a human editing the node ' +
-	'gets. Width has a floor you may set via "minWidth" and a ceiling via "maxWidth" (default 300), ' +
-	'since a human can also drag a node\'s right edge to change its ceiling by hand - text longer than ' +
-	'"maxWidth" wraps instead of growing the node wider; height has NO such floor and is never yours ' +
-	'to decide - it always falls out purely from wrapping ' +
-	'the text at the node\'s width, so "minHeight" is not accepted and is always forced to 0/auto. If a ' +
-	'node reads too short or too tall, that is a text-length/minWidth problem, not a height problem - ' +
-	'wider (bigger minWidth) means shorter, narrower means taller; never try to fix it by requesting a ' +
-	'height. (2) links reference nodes by "id" (never ' +
-	'array index, which is incidental) - a link whose "one"/"two" does not match a node "id" in the ' +
-	'same set_document call is silently unrenderable, so always include both endpoint nodes and the ' +
-	'link together. (3) a link with no explicit "direction" defaults to "none" (a plain unarrowed ' +
-	'line) and no explicit "color" defaults to the theme color, not to either endpoint node\'s color - ' +
-	'do not assume a new link auto-picks up interesting styling. ' +
-	'PERSISTENCE: there is no server-side persistence - the document lives only in memory until a ' +
-	'human explicitly exports it to a .arrows file; get_document/set_document mirror that same ' +
-	'{nodes, links} shape. ' +
-	'If you have not already called describe_tools on this connection, call it first for this same ' +
-	'context plus the exact node/link JSON shapes referenced below as "above".';
+// ---------------------------------------------------------------------
+// Shared agent-facing context, lazily loadable via the app_description tool.
+//
+// This used to be one large MOCK_WORKFLOW_NOTE + __mcpSummary blob prepended
+// in full to EVERY tool's `description` below - meaning an MCP client paid
+// for the entire block once per tool in its primer/manifest, even though
+// most of it (the exact node/link shape reference, sizing gotchas, etc.) is
+// only relevant to a handful of tool calls in a given session.
+//
+// It is now split into named sections (DESCRIPTION_SECTIONS below), mirroring
+// htmlpaint.com's mcpbridge.js (see that file's own comment for the fuller
+// rationale). Per-tool `description` strings only keep what's genuinely
+// tool-specific, plus short pointers like "see app_description('node-shape')"
+// instead of the full text. window.__mcpSummary is still a single joined
+// string (all sections' `text`, in order, under "## TITLE" headings) for
+// backward compatibility with existing external tooling - built FROM this
+// array, not maintained separately, so the two can't drift.
+// ---------------------------------------------------------------------
 
-/** @type {any} */ (window as any).__mcpSummary =
-	MOCK_WORKFLOW_NOTE +
-	' EXACT NODE SHAPE: {"id": string|number, unique, referenced by links - keep an existing node\'s ' +
-	'id unchanged, "x"/"y": numbers, CENTER in canvas coordinates (canvas panning is a separate scene ' +
-	'offset, see get_scene/set_scene), "width"/"height": read-only, DO NOT SET - a DOM-measurement ' +
-	'cache that set_document ignores on input and always recomputes after render; do not echo back ' +
-	'values read from get_document, "minWidth": number, 0 = no minimum, the only floor size you may ' +
-	'request, "maxWidth": number, default 300, the ceiling before text wraps instead of widening the ' +
-	'node (same value a human sets by dragging the node\'s right edge) - height is never settable, not ' +
-	'even as a floor: it is always the pure result of wrapping ' +
-	'the node\'s text at its (auto, minWidth-floored, or maxWidth-capped) width, exactly like a human ' +
-	'editing the node gets, "color": CSS color string or "" for theme ' +
-	'default, "text": inner HTML shown in the node (plain text is always safe), "size": one of ' +
-	'"15px"|"20px"|"25px"|"30px", "type": 0=roundrect, 1=rect, 2=circle, 3=ellipse, 4=rhombus, ' +
-	'5=parallelogram - use rotate_node_type on a selection to cycle these rather than hand-guessing ' +
-	'the int. EXACT LINK SHAPE: {"one": NodeId, "two": NodeId - the connected nodes\' ids, order does ' +
-	'not imply direction, "direction": "none"|"left"|"right"|"both" - which end(s) get an arrowhead; ' +
-	'"left"/"right" mean whichever node currently renders further left/right on screen, NOT "one" vs ' +
-	'"two", so the arrow can visually flip if a node\'s x later moves it past the other node - prefer ' +
-	'"both"/"none" if a stable "points at node X" meaning matters more than screen side, "dash": ""|' +
-	'"4" (solid/dashed), "width": 2|4|6 (stroke px), "color": CSS color or undefined for theme ' +
-	'default, "text": optional label following the curve. Nodes/links are flat top-level arrays, not ' +
-	'nested - connectivity is expressed purely by node x/y plus link one/two, there is no parent/ ' +
-	'child scene graph.';
+type DescriptionSection = {topic: string; title: string; blurb: string; text: string};
+
+const DESCRIPTION_SECTIONS: DescriptionSection[] = [
+	{
+		topic: 'workflow',
+		title: 'WORKFLOW',
+		blurb: 'What mindfoo is, tool choice (whole-document vs single-node/link), and gotcha overview.',
+		text:
+			'Context: mindfoo (aka "arrows") is a freeform visual mind-mapping / diagramming tool. A diagram ' +
+			'is "nodes" (shapes: roundrect/rect/circle/ellipse/rhombus/parallelogram, holding text/color/font ' +
+			'size, positioned by an x/y CENTER point, not top-left) PLUS "links" (curved connector lines ' +
+			'between two node ids, each independently stylable as a plain line or an arrow). get_document/' +
+			'set_document read/write the WHOLE tree (nodes + links together) and are for structural changes - ' +
+			'building a new diagram, adding/removing nodes or links. For a small edit to ONE node that already ' +
+			'exists (recolor it, change its text, nudge x/y, resize via minWidth/maxWidth) use get_node/' +
+			'patch_node instead - they address a single node by "id" and are far cheaper than resending the ' +
+			'whole document for a one-field change; never call set_document just to change one field on one ' +
+			'existing node. There is still no per-link update tool - a link change requires set_document with ' +
+			'the complete links array. ' +
+			'See app_description("node-shape") for the exact node field reference and sizing gotchas, and ' +
+			'app_description("link-shape") for the exact link field reference and its own gotchas. ' +
+			'PERSISTENCE: there is no server-side persistence - the document lives only in memory until a ' +
+			'human explicitly exports it to a .arrows file; get_document/set_document mirror that same ' +
+			'{nodes, links} shape. ' +
+			'If you have not already called app_description on this connection, call it with no topic first - ' +
+			'it returns the index of available sections, which are not repeated in every individual tool ' +
+			'description.',
+	},
+	{
+		topic: 'node-shape',
+		title: 'EXACT NODE SHAPE',
+		blurb: 'Node field reference, plus the x/y-is-center and width/height-is-read-only sizing gotchas.',
+		text:
+			'EXACT NODE SHAPE: {"id": string|number, unique, referenced by links - keep an existing node\'s ' +
+			'id unchanged, "x"/"y": numbers, CENTER in canvas coordinates (canvas panning is a separate scene ' +
+			'offset, see get_scene/set_scene), "width"/"height": read-only, DO NOT SET - a DOM-measurement ' +
+			'cache that set_document ignores on input and always recomputes after render; do not echo back ' +
+			'values read from get_document, "minWidth": number, 0 = no minimum, the only floor size you may ' +
+			'request, "maxWidth": number, default 300, the ceiling before text wraps instead of widening the ' +
+			'node (same value a human sets by dragging the node\'s right edge) - height is never settable, not ' +
+			'even as a floor: it is always the pure result of wrapping ' +
+			'the node\'s text at its (auto, minWidth-floored, or maxWidth-capped) width, exactly like a human ' +
+			'editing the node gets, "color": CSS color string or "" for theme ' +
+			'default, "text": inner HTML shown in the node (plain text is always safe), "size": one of ' +
+			'"15px"|"20px"|"25px"|"30px", "type": 0=roundrect, 1=rect, 2=circle, 3=ellipse, 4=rhombus, ' +
+			'5=parallelogram - use rotate_node_type on a selection to cycle these rather than hand-guessing ' +
+			'the int. ' +
+			'GOTCHA: node "x"/"y" are the CENTER, not top-left, and "width"/"height" are a read-only DOM-' +
+			'measurement cache - set_document ignores any "width"/"height" you pass and always starts new/' +
+			'replaced nodes at the same placeholder size, which is then corrected by the live measurement pass ' +
+			'right after render, the same auto-sizing-to-content (incl. text wrapping) a human editing the node ' +
+			'gets. Width has a floor you may set via "minWidth" and a ceiling via "maxWidth" (default 300), ' +
+			'since a human can also drag a node\'s right edge to change its ceiling by hand - text longer than ' +
+			'"maxWidth" wraps instead of growing the node wider; height has NO such floor and is never yours ' +
+			'to decide - it always falls out purely from wrapping ' +
+			'the text at the node\'s width, so "minHeight" is not accepted and is always forced to 0/auto. If a ' +
+			'node reads too short or too tall, that is a text-length/minWidth problem, not a height problem - ' +
+			'wider (bigger minWidth) means shorter, narrower means taller; never try to fix it by requesting a ' +
+			'height.',
+	},
+	{
+		topic: 'link-shape',
+		title: 'EXACT LINK SHAPE',
+		blurb: 'Link field reference, plus the id-not-index, default-direction/color, and left/right-flip gotchas.',
+		text:
+			'EXACT LINK SHAPE: {"one": NodeId, "two": NodeId - the connected nodes\' ids, order does ' +
+			'not imply direction, "direction": "none"|"left"|"right"|"both" - which end(s) get an arrowhead; ' +
+			'"left"/"right" mean whichever node currently renders further left/right on screen, NOT "one" vs ' +
+			'"two", so the arrow can visually flip if a node\'s x later moves it past the other node - prefer ' +
+			'"both"/"none" if a stable "points at node X" meaning matters more than screen side, "dash": ""|' +
+			'"4" (solid/dashed), "width": 2|4|6 (stroke px), "color": CSS color or undefined for theme ' +
+			'default, "text": optional label following the curve. Nodes/links are flat top-level arrays, not ' +
+			'nested - connectivity is expressed purely by node x/y plus link one/two, there is no parent/ ' +
+			'child scene graph. ' +
+			'GOTCHAS: (1) links reference nodes by "id" (never array index, which is incidental) - a link ' +
+			'whose "one"/"two" does not match a node "id" in the same set_document call is silently ' +
+			'unrenderable, so always include both endpoint nodes and the link together. (2) a link with no ' +
+			'explicit "direction" defaults to "none" (a plain unarrowed line) and no explicit "color" ' +
+			'defaults to the theme color, not to either endpoint node\'s color - do not assume a new link ' +
+			'auto-picks up interesting styling.',
+	},
+	{
+		topic: 'transient',
+		title: 'RUN_TRANSIENT (one-off computations)',
+		blurb: 'When to reach for run_transient instead of computing an aggregate over node/link data yourself.',
+		text:
+			'RUN_TRANSIENT: for an aggregate or nontrivial reduction over MANY nodes/links (e.g. "how many ' +
+			'nodes are circles", "average x position of selected nodes", "list every link with no direction ' +
+			'set") call run_transient instead of computing it yourself by reading get_document and doing the ' +
+			'arithmetic/filtering in-context - that gets unreliable as the diagram grows, producing a ' +
+			'plausible-looking wrong answer with no error signal, whereas real JS run against the live data ' +
+			'is deterministic. Do NOT use it for anything the other tools already do (reading/writing nodes, ' +
+			'links, selection) and do not reach for it on a handful of items you could just read directly - ' +
+			'reserve it for "many items, nontrivial reduction". CALLING CONTRACT: "code" is a JS function BODY, ' +
+			'not a full function declaration (do not wrap it in "function(){...}"). It receives ' +
+			'(args, document, window) and whatever it RETURNS becomes the result (a bare expression without ' +
+			'"return" produces no result). It is compiled and run once for this call only, then discarded - it ' +
+			'is NOT persisted anywhere and does NOT become a new registered tool. It is still full code ' +
+			'execution in the page\'s own origin, same as any other browser devtools console statement - ' +
+			'session-scoping bounds persistence, not capability.',
+	},
+];
+
+const APP_BLURB =
+	'mindfoo (aka "arrows") is a freeform visual mind-mapping/diagramming tool: nodes are shapes ' +
+	'positioned by their CENTER, links are connector lines between two node ids - call app_description() ' +
+	'(no args) for the topic index before writing/reading nodes or links, especially before touching ' +
+	'sizing (width/height are read-only) or link direction/color defaults.';
+
+/** @type {any} */ (window as any).__mcpSummary = DESCRIPTION_SECTIONS
+	.map((s) => `## ${s.title}\n${s.text}`)
+	.join('\n\n');
+
+function describeApp({topic}: {topic?: string} = {}): string {
+	if (!topic) {
+		return JSON.stringify({
+			blurb: APP_BLURB,
+			topics: DESCRIPTION_SECTIONS.map((s) => ({topic: s.topic, title: s.title, blurb: s.blurb})),
+		});
+	}
+	let section = DESCRIPTION_SECTIONS.find((s) => s.topic === topic);
+	if (!section) {
+		let names = DESCRIPTION_SECTIONS.map((s) => s.topic).join(', ');
+		throw new Error(`no app_description topic named "${topic}" - available topics: ${names}`);
+	}
+	return JSON.stringify({topic: section.topic, title: section.title, text: section.text});
+}
+
+// Kept as a short alias so any per-tool description that still wants one
+// inline sentence of framing doesn't need the full workflow section text.
+const MOCK_WORKFLOW_NOTE = APP_BLURB;
+
+// Compiles and immediately runs "code" as a JS function body for THIS call
+// only, then discards it - see app_description("transient") for the full
+// contract/rationale, and js-bridge-mcp's run_transient pilot
+// (legacy-page/hello-world.html) / bulletino's mcpbridge.mjs for the
+// reference implementation this mirrors.
+function runTransient({code, args}: {code: string; args?: string}): string {
+	let parsedArgs: unknown;
+	try {
+		parsedArgs = typeof args === 'string' && args ? JSON.parse(args) : undefined;
+	} catch (e) {
+		throw new Error(`args must be a JSON string (or omitted) - failed to parse: ${(e as Error).message}`);
+	}
+	// eslint-disable-next-line no-new-func -- deliberate, see app_description("transient")
+	const fn = new Function('args', 'document', 'window', code);
+	const result = fn(parsedArgs, document, window);
+	return typeof result === 'string' ? result : JSON.stringify(result);
+}
 
 function readDocument(): string {
 	return JSON.stringify({ nodes: nodes.get(), links: links.get() });
@@ -666,5 +772,32 @@ function hexToRgba(hex: string): { r: number; g: number; b: number; a: number } 
 		params: { theme: { type: 'string', description: '"dark" or "light"' } },
 		example: { theme: 'dark' },
 		fn: setTheme,
+	},
+	{
+		name: 'app_description',
+		description: 'Call with no args first, on this connection, to get the topic index (node-shape, ' +
+			'link-shape, workflow, transient) before writing/reading nodes or links - each topic\'s full text ' +
+			'is only fetched when actually needed, instead of every tool description paying for all of it. ' +
+			'Call again with {"topic":"..."} to fetch one section\'s full text, e.g. right before writing a ' +
+			'node (app_description("node-shape")) or a link (app_description("link-shape")).',
+		params: { topic: { type: 'string', description: 'Optional topic key from the index; omit to get the index itself', optional: true } },
+		example: { topic: 'node-shape' },
+		fn: describeApp,
+	},
+	{
+		name: 'run_transient',
+		description: 'Compiles and immediately runs a one-off JS function body for THIS call only, then ' +
+			'discards it - nothing persists, it does not become a new registered tool. Use for an aggregate ' +
+			'or nontrivial reduction over MANY nodes/links (counts, sums, filters by a computed condition) ' +
+			'instead of computing it yourself in-context, which gets unreliable as the diagram grows. See ' +
+			'app_description("transient") for the full calling contract and rationale. "code" is a JS ' +
+			'function BODY (not "function(){...}"), receives (args, document, window), and whatever it ' +
+			'RETURNS becomes the result.',
+		params: {
+			code: { type: 'string', description: 'JS function body; receives (args, document, window), return value becomes the result' },
+			args: { type: 'string', description: 'JSON string passed as `args`; omit if code takes no input', optional: true },
+		},
+		example: { code: 'return document.querySelectorAll("svg .node").length;' },
+		fn: runTransient,
 	},
 ];
