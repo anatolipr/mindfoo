@@ -772,7 +772,19 @@ export function doExportToServer(): void {
 }
 
 export async function doImportFromServer(): Promise<void> {
-    const content = await importFromServer();
+    if (!window.location.hash.substring(1)) {
+        alert('No target - add a #name to the URL before importing');
+        return;
+    }
+    let content: string | null;
+    try {
+        content = await importFromServer();
+    } catch (e) {
+        alert((e as { notFound?: boolean; message: string }).notFound
+            ? (e as Error).message
+            : `Import failed: ${(e as Error).message}`);
+        return;
+    }
     if (!content) {
         alert('empty response');
         return;
@@ -780,8 +792,16 @@ export async function doImportFromServer(): Promise<void> {
     loadContent(content, 'invalid format');
 }
 
-async function loadFromServer(name: string): Promise<void> {
-    const content = await importFromServer(name);
+export async function loadFromServer(name: string): Promise<void> {
+    let content: string | null;
+    try {
+        content = await importFromServer(name);
+    } catch (e) {
+        alert((e as { notFound?: boolean; message: string }).notFound
+            ? (e as Error).message
+            : `Import failed: ${(e as Error).message}`);
+        return;
+    }
     if (content) {
         loadContent(content, 'invalid format');
     }

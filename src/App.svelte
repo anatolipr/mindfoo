@@ -27,6 +27,7 @@
         doImport,
         doExport,
         doImportFromServer,
+        loadFromServer,
         doExportToServer,
         bodyMouseDown,
         mousemove,
@@ -62,8 +63,33 @@
     import { determineArrow } from './data/directions';
     import { toggleTheme } from './data/theme';
     import { makeShape } from './geo';
-     
+    import { FOLDERFOO_HOST, TENANT_ID } from './server-config';
+
 	 onMount ( init )
+
+	 onMount(async () => {
+		 await import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/folderfoo-profile-circle.js`);
+		 const el = document.createElement('folderfoo-profile-circle');
+		 el.setAttribute('app-name', 'MindFoo');
+		 el.setAttribute('tenant-id', TENANT_ID);
+		 document.body.appendChild(el);
+	 })
+
+	 // File Open (folderfoo-profile-circle's picker) only announces which
+	 // file was chosen - it's this app's job to decide what "current file"
+	 // means and to actually load it. MindFoo's convention is the URL
+	 // #hash (see data/remote.ts's $serverName / init()'s page-load path),
+	 // so mirror that here: update the hash, then load by that same name.
+	 onMount(() => {
+		 const onFileOpen = (e: Event) => {
+			 const name = (e as CustomEvent<{ name: string }>).detail?.name;
+			 if (!name) return;
+			 window.location.hash = name;
+			 loadFromServer(name);
+		 };
+		 document.addEventListener('folderfoo-file-open', onFileOpen);
+		 return () => document.removeEventListener('folderfoo-file-open', onFileOpen);
+	 })
 
 </script>
 

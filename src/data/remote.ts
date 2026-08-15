@@ -1,72 +1,49 @@
 import Foo from 'avos/src/foo-store/foo';
+import { FOLDERFOO_HOST, TENANT_ID } from '../server-config';
 
-// namespaced with _mfoo so a #name shared with other foo-store apps
-// (e.g. bulletino's _btno) never collides on the server
-const SUFFIX = '_mfoo';
-const LOCAL_STORAGE_KEY = 'mfoo_server';
+interface DocumentSlot {
+    readonly currentName: string | undefined;
+    save(data: unknown): Promise<string>;
+    load(name?: string): Promise<unknown>;
+}
 
-export const $serverName: Foo<string | undefined> = new Foo<string | undefined>(determineServer());
+const SLOT_URL = `${FOLDERFOO_HOST}/elements/server-slot.js`;
+const slotPromise: Promise<DocumentSlot> = import(/* @vite-ignore */ SLOT_URL).then(
+    ({ createDocumentSlot }) => createDocumentSlot({ tenantId: TENANT_ID })
+);
 
+export const $serverName: Foo<string | undefined> = new Foo<string | undefined>(
+    window.location.hash.substring(1) || undefined
+);
+window.addEventListener('hashchange', () => {
+    $serverName.set(window.location.hash.substring(1) || undefined);
+});
+
+// body/return values here are JSON-encoded strings (store.ts's existing
+// contract) - passed straight through to slot.save()/slot.load() with no
+// parse/re-encode at this boundary. folderfoo's storage layer is
+// deliberately not opinionated about what shape a saved value takes (see
+// docs/agent-integration-guide.md's "File format is a tenant concern"
+// note) - it stores whatever JS value it's given and returns that exact
+// value back. Reparsing here would silently change the on-disk format from
+// what every previously-saved document already used, which is exactly the
+// bug this comment is here to prevent regressing again.
 export async function exportToServer(body: string): Promise<void> {
-    const server = determineServerName();
-    if (!server) {
-        alert('No server defined');
-        return;
-    }
+    const slot = await slotPromise;
     try {
-        await fetch(getServerUrlForWrite(server), {
-            method: 'POST',
-            body
-        });
-        alert(`Exported to ${server}`);
+        const name = await slot.save(body);
+        alert(`Exported to ${name}`);
     } catch (e) {
         alert((e as Error).message);
     }
 }
 
+// Propagates slot.load()'s not-found error as-is (Error with .notFound and
+// .documentName set) rather than catching it here - store.ts's two call
+// sites (page-load vs. the manual "load from server" button) want
+// different UX for that case, so the catch belongs there.
 export async function importFromServer(name?: string): Promise<string | null> {
-    const server = name || determineServerName();
-    if (!server) {
-        alert('No server defined');
-        return null;
-    }
-    const r = await fetch(getServerUrlForRead(server));
-    return r.text();
-}
-
-function determineServerName(): string | undefined {
-    let server = getServer();
-    if (!server) {
-        server = prompt('Enter server name') || undefined;
-        if (server) {
-            setServer(server);
-        }
-    }
-    return server;
-}
-
-function getServerUrlForRead(name: string): string {
-    return `https://files.cuul.cc/data/${name}${SUFFIX}`;
-}
-
-function getServerUrlForWrite(name: string): string {
-    return `https://files.cuul.cc/save/${name}${SUFFIX}`;
-}
-
-function determineServer(): string | undefined {
-    const hash = window.location.hash.substring(1);
-    if (hash) {
-        return hash;
-    }
-    return localStorage.getItem(LOCAL_STORAGE_KEY) || undefined;
-}
-
-function setServer(name: string): void {
-    $serverName.set(name);
-    window.location.hash = name;
-    localStorage.setItem(LOCAL_STORAGE_KEY, name);
-}
-
-function getServer(): string | undefined {
-    return $serverName.get();
+    const slot = await slotPromise;
+    const data = await slot.load(name);
+    return typeof data === 'string' ? data : null;
 }

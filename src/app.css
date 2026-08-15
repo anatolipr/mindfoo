@@ -57,3 +57,10 @@ body.dark {
 	--link-hover: hsl(206, 96%, 78%);
 	--link-active: hsl(206, 96%, 64%);
 }
+
+folderfoo-profile-circle {
+	position: fixed;
+	top: 16px;
+	right: 16px;
+	z-index: 2147483000;
+}
