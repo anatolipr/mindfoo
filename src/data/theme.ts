@@ -1,10 +1,13 @@
-import Foo from "avos/src/foo-store/foo";
+import { Signal } from "avosignals";
 
-export const $theme: Foo<string> = new Foo('dark');
+export const $theme: Signal<string> = new Signal('dark');
 
-$theme.subscribe(theme => 
-   {document.body.classList.toggle('dark', theme === 'dark')}
-)
+function applyTheme(): void {
+    document.body.classList.toggle('dark', $theme.get() === 'dark');
+}
+
+applyTheme();
+$theme.subscribe(applyTheme);
 export function toggleTheme(): void {
     $theme.set($theme.get() === 'dark' ? 'light' : 'dark')
 }

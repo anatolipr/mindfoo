@@ -1,10 +1,9 @@
 
-import  Foo  from 'avos/src/foo-store/foo';
+import { Signal } from 'avosignals';
 
-import { type Line, type Link, type Coordinates, 
+import { type Line, type Link, type Coordinates,
     type Node, type NodeId, type OptionalSelectedIndex, UNSELECTED, DEFAULT_WIDTH, DEFAULT_DASH, DEFAULT_NODE_TYPE, DEFAULT_NODE_FONT_SIZE } from './types';
 import { nanoid } from 'nanoid';
-import { tick } from 'svelte';
 import { lineCurveFactor } from './consts';
 import intersect from "path-intersection"
 import { deCasteljau, makeCurve, makeShape } from '../geo';
@@ -15,28 +14,49 @@ import { nextDash, nextWidth } from './properties/linkPropertiesHelper';
 import { nextNodeSize, nextNodeType } from './properties/nodePropertiesHelper';
 import { exportToServer, importFromServer } from './remote';
 
-export const $nodes: Foo<Node[]> = new Foo(<Node[]>[], localStorage.getItem('debugNodes') ? 'nodes' : undefined);
-export const $links: Foo<Link[]> = new Foo(<Link[]>[], localStorage.getItem('debugLinks') ? 'links' : undefined);
-export const $lines: Foo<Line[]> = new Foo(<Line[]>[], localStorage.getItem('debugLines') ? 'lines' : undefined);
+export const $nodes: Signal<Node[]> = new Signal(<Node[]>[], localStorage.getItem('debugNodes') ? 'nodes' : undefined);
+export const $links: Signal<Link[]> = new Signal(<Link[]>[], localStorage.getItem('debugLinks') ? 'links' : undefined);
+export const $lines: Signal<Line[]> = new Signal(<Line[]>[], localStorage.getItem('debugLines') ? 'lines' : undefined);
 
-export const $mouse: Foo<Coordinates> = new Foo({x:0, y:0})
-export const $scene: Foo<Coordinates> = new Foo({x:0, y:0})
-export const $selectionStart: Foo<Coordinates> = new Foo({x: 0, y: 0});
+export const $mouse: Signal<Coordinates> = new Signal({x:0, y:0})
+export const $scene: Signal<Coordinates> = new Signal({x:0, y:0})
+export const $selectionStart: Signal<Coordinates> = new Signal({x: 0, y: 0});
 
-export const $moving: Foo<boolean> = new Foo(false);
-export const $resizingWidth: Foo<number> = new Foo(UNSELECTED as number);
-export const $editing: Foo<boolean> = new Foo(false);
+export const $moving: Signal<boolean> = new Signal(false);
+export const $resizingWidth: Signal<number> = new Signal(UNSELECTED as number);
+export const $editing: Signal<boolean> = new Signal(false);
 
-export const $selection: Foo<number[]> = new Foo(<number[]>[], "selection");
-export const $previousSelection: Foo<number[]> = new Foo(<number[]>[]);
-export const $selectedLink: Foo<OptionalSelectedIndex> = new Foo(UNSELECTED as OptionalSelectedIndex);
+export const $selection: Signal<number[]> = new Signal(<number[]>[], "selection");
+export const $previousSelection: Signal<number[]> = new Signal(<number[]>[]);
+export const $selectedLink: Signal<OptionalSelectedIndex> = new Signal(UNSELECTED as OptionalSelectedIndex);
 
-export const $nodeMap: Foo<{[key: NodeId]: Node}> = new Foo({});
+export const $nodeMap: Signal<{[key: NodeId]: Node}> = new Signal({});
 
-export const $selecting: Foo<boolean> = new Foo(false);
-export const $menu: Foo<string> = new Foo('');
+export const $selecting: Signal<boolean> = new Signal(false);
+export const $menu: Signal<string> = new Signal('');
 
 // ---
+
+// The view (a Lit component) renders node/edit elements into its own
+// shadow root, so plain document.getElementById lookups no longer find
+// them. The view registers its root here on connect; getById() falls
+// back to `document` so this module still works if no root is registered.
+let viewRoot: ParentNode = document;
+
+export function setViewRoot(root: ParentNode): void {
+    viewRoot = root;
+}
+
+function getById(id: string): HTMLElement | null {
+    return viewRoot.querySelector(`#${CSS.escape(id)}`);
+}
+
+// Waits for the view's pending render to flush to the DOM. Lit schedules
+// updates on a microtask, so awaiting one is enough for a render triggered
+// synchronously above to have completed.
+export function tick(): Promise<void> {
+    return Promise.resolve();
+}
 
 export function init() {
     const nodes0 = $nodes.get();
@@ -169,7 +189,7 @@ export async function add() {
     await tick();
 
     resize($nodes.get().length - 1, true);
-    document.getElementById(`d${id}`)?.focus()
+    getById(`d${id}`)?.focus()
     
 }
 
@@ -179,7 +199,7 @@ export function resize(i: number, doLines: boolean = false) {
 
     if(!nodes0[i]) return
 
-    let rect: DOMRect = document.getElementById(`d${nodes0[i].id}`)
+    let rect: DOMRect = getById(`d${nodes0[i].id}`)
             ?.getBoundingClientRect()!;
     nodes0[i].width = rect.width;
     nodes0[i].height = rect.height;
@@ -1002,7 +1022,7 @@ export function colorChange(e: CustomEvent) {
 export async function toggleEdit(id: NodeId) {
     $editing.set(true);
     await tick();
-    let element = document.getElementById(`e${id}`);
+    let element = getById(`e${id}`);
     element?.focus();
     selectText(element!);
 }

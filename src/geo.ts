@@ -47,17 +47,21 @@ export function makeRect(width: number, height: number, cx: number, cy: number, 
   let halfX = width/2;
   let halfY = height/2;
   if (r > 0) {
-    return `M ${cx - halfX + r} ${cy - halfY} 
-					h${width - r*2} 
-					a${r},${r} 0 0 1 ${r},${r} 
-					v${height -r*2} 
-					a${r},${r} 0 0 1 -${r},${r} 
-					h-${width -r*2} 
-					a${r},${r} 0 0 1 -${r},-${r} 
-					v-${height -r*2} 
-					a${r},${r} 0 0 1 ${r},-${r}`
+    // clamp so the straight segments (width - r*2 / height - r*2) never go
+    // negative - otherwise the path emits a double-negative sign (eg "h--5")
+    // which is invalid SVG path syntax
+    let radius = Math.max(0, Math.min(r, halfX, halfY));
+    return `M ${cx - halfX + radius} ${cy - halfY}
+					h${width - radius*2}
+					a${radius},${radius} 0 0 1 ${radius},${radius}
+					v${height -radius*2}
+					a${radius},${radius} 0 0 1 -${radius},${radius}
+					h-${width -radius*2}
+					a${radius},${radius} 0 0 1 -${radius},-${radius}
+					v-${height -radius*2}
+					a${radius},${radius} 0 0 1 ${radius},-${radius}`
   } else {
-    return `M ${cx - halfX} ${cy - halfY} 
+    return `M ${cx - halfX} ${cy - halfY}
 				 h ${width} v ${height} h -${width} v -${height} `
   }
 }

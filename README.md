@@ -2,7 +2,7 @@
 
 ### What is MindFoo
   
-MindFoo is an diagraming web app written in Svelte, and Typescript.
+MindFoo is an diagraming web app written in Lit, and Typescript.
 
 It is for the most part an attempt to make a more rapid mind mapping tool which can be used for instant and hopefully easy rapid brainstorming.
 

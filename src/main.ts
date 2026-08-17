@@ -1,7 +1,5 @@
-import App from './App.svelte'
 import './app.css'
 import './mcpbridge'
+import './mind-foo-app'
 
-export default new App({
-  target: document.getElementById('app')!,
-})
+document.getElementById('app')!.appendChild(document.createElement('mind-foo-app'))

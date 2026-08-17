@@ -30,12 +30,12 @@ import {
 	makeNodesMap,
 	makeLines,
 	resize,
+	tick,
 } from './data/store';
 import { $theme as theme, toggleTheme } from './data/theme';
 import type { Link, Node, NodeId } from './data/types';
 import { UNSELECTED, DEFAULT_NODE_FONT_SIZE, DEFAULT_NODE_TYPE, DEFAULT_WIDTH, DEFAULT_DASH } from './data/types';
 import { nanoid } from 'nanoid';
-import { tick } from 'svelte';
 import { assertValidNodes, assertValidLinks } from './data/dataSchema';
 
 // ---------------------------------------------------------------------
@@ -338,18 +338,18 @@ function setTheme({ theme: t }: { theme: string }): string {
 //
 // "width"/"height" are intentionally NOT accepted from the agent-supplied
 // node here, even if present on the input: they are purely a cache of a
-// live DOM measurement (see App.svelte's bind:clientWidth/clientHeight),
-// never used to set the rendered box's actual CSS size (that's driven by
-// content + minWidth, wrapped exactly like a human typing into the node
-// would), and get overwritten by the ResizeObserver-driven measurement
-// pass on next render regardless. An agent echoing back a stale measured
+// live DOM measurement (see mind-foo-app.ts's ResizeObserver-backed
+// observeNodeSize()), never used to set the rendered box's actual CSS size
+// (that's driven by content + minWidth, wrapped exactly like a human typing
+// into the node would), and get overwritten by the ResizeObserver-driven
+// measurement pass on next render regardless. An agent echoing back a stale measured
 // value from an earlier get_document (rather than the generic 140/140
 // default) made some bridge-authored nodes look inconsistently sized next
 // to freshly-created ones - always start every bridge-authored node from
 // the same 140/140 placeholder so they behave identically until measured.
 //
 // "minHeight" is likewise never accepted from the agent, even though the
-// Node type/UI technically support it (App.svelte does render it as CSS
+// Node type/UI technically support it (mind-foo-app.ts does render it as CSS
 // min-height) - it is always forced to 0 here. Height must stay something
 // only text-wrap + width ever decides, the same as when a human edits a
 // node; agents that want a node "bigger" should ask for a bigger minWidth
@@ -413,8 +413,8 @@ async function setDocument({ documentJson }: { documentJson: string }): Promise<
 	// node.width/height, so calling makeLines() immediately here would trim
 	// curves against the placeholder box instead of the real rendered one
 	// (visibly wrong for any node whose real size differs from 140x140,
-	// which is most of them). Mirror add()'s pattern instead: wait for
-	// Svelte to render the placeholder-sized boxes (tick()), measure every
+	// which is most of them). Mirror add()'s pattern instead: wait for the
+	// view to render the placeholder-sized boxes (tick()), measure every
 	// node's real box via resize() same as a user's drag/add does, THEN
 	// compute lines against the corrected sizes - the same
 	// dragged-node-recalculates-line-endpoints behavior the UI gives a
@@ -426,13 +426,13 @@ async function setDocument({ documentJson }: { documentJson: string }): Promise<
 		resize(i);
 	}
 	makeLines();
-	// resize() (and the app's own bind:clientWidth/clientHeight) mutate each
-	// node's width/height IN PLACE on the array already held by the $nodes
-	// Foo store, without calling Foo#set() - so nothing has actually
+	// resize() (and the app's own ResizeObserver-driven auto-sizing) mutate
+	// each node's width/height IN PLACE on the array already held by the
+	// $nodes Signal, without calling Signal#set() - so nothing has actually
 	// re-published to $nodes' subscribers yet, even though the underlying
 	// data is now correct. The interactive add() path (see store.ts) never
 	// hits this because it always follows up with $nodes.update(...), which
-	// republishes the WHOLE list and makes Svelte's {#each $nodes} block
+	// republishes the WHOLE list and makes the view's node repeat() block
 	// rerun makeShape(node) for every node - that republish, not the
 	// measurement itself, is what actually repaints the SVG shapes at their
 	// correct size. Skipping this call is exactly what made bridge-authored

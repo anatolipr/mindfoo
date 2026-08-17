@@ -1,5 +1,5 @@
 {
-  "name": "vite-svelte-ts-starter",
+  "name": "mindfoo",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,25 +7,21 @@
     "dev": "vite",
     "build": "vite build",
     "test": "vitest --run",
-    "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "preview": "vite preview"
   },
   "dependencies": {
     "avos": "1.0.16",
+    "avosignals": "^1.0.16",
+    "lit": "^3.3.3",
     "nanoid": "^5.0.6",
-    "path-intersection": "3.1.0",
-    "svelte-color-picker": "^1.0.7"
+    "path-intersection": "3.1.0"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^3.0.2",
-    "@tsconfig/svelte": "^5.0.2",
     "@types/uuid": "^9.0.8",
     "jsdom": "^24.0.0",
-    "svelte": "^4.2.12",
-    "svelte-check": "^3.6.7",
     "tslib": "^2.6.2",
     "typescript": "^5.2.2",
-    "vite": "^5.2.0",
+    "vite": "^7.3.6",
     "vitest": "1.4.0"
   }
 }

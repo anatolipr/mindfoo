@@ -1,4 +1,4 @@
-import Foo from 'avos/src/foo-store/foo';
+import { Signal } from 'avosignals';
 import { FOLDERFOO_HOST, TENANT_ID } from '../server-config';
 
 interface DocumentSlot {
@@ -12,7 +12,7 @@ const slotPromise: Promise<DocumentSlot> = import(/* @vite-ignore */ SLOT_URL).t
     ({ createDocumentSlot }) => createDocumentSlot({ tenantId: TENANT_ID })
 );
 
-export const $serverName: Foo<string | undefined> = new Foo<string | undefined>(
+export const $serverName: Signal<string | undefined> = new Signal<string | undefined>(
     window.location.hash.substring(1) || undefined
 );
 window.addEventListener('hashchange', () => {
