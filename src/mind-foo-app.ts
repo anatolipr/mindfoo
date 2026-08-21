@@ -35,6 +35,9 @@ import {
     doImportFromServer,
     loadFromServer,
     doExportToServer,
+    newFile,
+    undo,
+    redo,
     bodyMouseDown,
     mousemove,
     mouseup,
@@ -305,6 +308,9 @@ export class MindFooApp extends LitElement {
                 @mousedown=${(e: MouseEvent) => e.stopPropagation()}
                 @dblclick=${(e: MouseEvent) => e.stopPropagation()}>
 
+                <button @click=${newFile}>new file</button>
+                <button @click=${undo}>undo</button>
+                <button @click=${redo}>redo</button>
                 <button @click=${toggleTheme}>${themeValue === 'dark' ? 'light' : 'dark'}</button>
                 <button @click=${() => menu.set(menuValue === 'color' ? '' : 'color')}>color</button>
                 ${menuValue === 'color' ? html`

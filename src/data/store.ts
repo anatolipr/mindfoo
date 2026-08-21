@@ -12,7 +12,7 @@ import { readFile, saveFile } from 'avos/src/util';
 import { rgbAsHex, selectText } from '../util';
 import { nextDash, nextWidth } from './properties/linkPropertiesHelper';
 import { nextNodeSize, nextNodeType } from './properties/nodePropertiesHelper';
-import { exportToServer, importFromServer } from './remote';
+import { exportToServer, importFromServer, $serverName } from './remote';
 
 export const $nodes: Signal<Node[]> = new Signal(<Node[]>[], localStorage.getItem('debugNodes') ? 'nodes' : undefined);
 export const $links: Signal<Link[]> = new Signal(<Link[]>[], localStorage.getItem('debugLinks') ? 'links' : undefined);
@@ -34,6 +34,54 @@ export const $nodeMap: Signal<{[key: NodeId]: Node}> = new Signal({});
 
 export const $selecting: Signal<boolean> = new Signal(false);
 export const $menu: Signal<string> = new Signal('');
+
+// --- undo/redo ---
+// Whole-document snapshots (nodes/links/scene) taken before each undoable
+// action, per the avosignals-undo-redo-snapshots pattern: simple and
+// reliable at this state size, vs. diffing or command objects.
+
+type DocSnapshot = { nodes: Node[]; links: Link[]; scene: Coordinates };
+
+let undoStack: DocSnapshot[] = [];
+let redoStack: DocSnapshot[] = [];
+
+function currentSnapshot(): DocSnapshot {
+    return structuredClone({ nodes: $nodes.get(), links: $links.get(), scene: $scene.get() });
+}
+
+function snapshot(): void {
+    undoStack.push(currentSnapshot());
+    redoStack = [];
+}
+
+function restoreSnapshot(snap: DocSnapshot): void {
+    $nodes.set(snap.nodes);
+    $links.set(snap.links);
+    $scene.set(snap.scene);
+    makeNodesMap($nodes.get());
+    $selection.set([]);
+    $selectedLink.set(UNSELECTED as OptionalSelectedIndex);
+    makeLines();
+}
+
+export function undo(): void {
+    const prev = undoStack.pop();
+    if (!prev) return;
+    redoStack.push(currentSnapshot());
+    restoreSnapshot(prev);
+}
+
+export function redo(): void {
+    const next = redoStack.pop();
+    if (!next) return;
+    undoStack.push(currentSnapshot());
+    restoreSnapshot(next);
+}
+
+function resetUndoHistory(): void {
+    undoStack = [];
+    redoStack = [];
+}
 
 // ---
 
@@ -67,13 +115,46 @@ export function init() {
 
     document.addEventListener('keydown', keydown);
 
-    const hash = window.location.hash.substring(1);
+    const hash = $serverName.get();
     if (hash) {
         loadFromServer(hash);
     }
 
+    // $serverName tracks window.location.hash (see remote.ts); react to it
+    // here so back/forward and in-app hash changes reload the doc, not just
+    // the initial page load.
+    const disposeServerName = $serverName.subscribe(() => {
+        const name = $serverName.get();
+        if (name) {
+            loadFromServer(name);
+        }
+    });
+
     return () => {
         document.removeEventListener('keydown', keydown)
+        disposeServerName();
+    }
+}
+
+export function newFile(): void {
+    const nodes0 = $nodes.get();
+    const links0 = $links.get();
+    if ((nodes0.length > 0 || links0.length > 0) &&
+        !confirm('Start a new file? Unsaved changes will be lost.')) {
+        return;
+    }
+
+    $nodes.set([]);
+    $links.set([]);
+    $lines.set([]);
+    $scene.set({ x: 0, y: 0 });
+    $selection.set([]);
+    $selectedLink.set(UNSELECTED as OptionalSelectedIndex);
+    makeNodesMap([]);
+    resetUndoHistory();
+
+    if (window.location.hash) {
+        window.location.hash = '';
     }
 }
 
@@ -83,6 +164,7 @@ export function rotateArrows(): void {
     const i = $selectedLink.get();
     if (i === UNSELECTED) return;
 
+    snapshot();
     $links.update(links => {
         links[i].direction = 
            determineNextDirection(links[i].direction)
@@ -95,6 +177,7 @@ export function rotateLineDash(): void {
     const i = $selectedLink.get();
     if (i === UNSELECTED) return;
 
+    snapshot();
     $links.update(links => {
         links[i].dash = nextDash(links[i].dash)
         return links
@@ -105,6 +188,7 @@ export function rotateLineWidth(): void {
     const i = $selectedLink.get();
     if (i === UNSELECTED) return;
 
+    snapshot();
     $links.update(links => {
         links[i].width = nextWidth(links[i].width)
         return links
@@ -115,12 +199,13 @@ export function rotateLineWidth(): void {
 export function lineText() {
     let selectedLink: OptionalSelectedIndex = $selectedLink.get();
     if (selectedLink === UNSELECTED) return;
-    
+
+    let text = prompt("line text:", $links.get()[selectedLink].text)
+    if (text === null) return;
+
+    snapshot();
     $links.update(links => {
-        let text = prompt("line text:", links[selectedLink].text)
-        if (text !== null) {
-            links[selectedLink].text = text
-        }
+        links[selectedLink].text = text
         return links;
     })
 }
@@ -144,6 +229,7 @@ export async function add() {
 
     let id = nanoid(5);
 
+    snapshot();
     $nodes.update((nodes0: Node[]) => {
 
         const selection = $selection.get();
@@ -287,7 +373,8 @@ export function wheel(e: WheelEvent) {
 }
 
 export function selectNode(i: number, e: MouseEvent) {
-    
+
+    snapshot();
     $previousSelection.set([...$selection.get()]);
     let previousSelection = $previousSelection.get()
 
@@ -360,6 +447,7 @@ export function addLink(one: NodeId, two: NodeId): void {
 const MIN_MAX_WIDTH = 60;
 
 export function startResizeWidth(i: number, e: MouseEvent) {
+    snapshot();
     $resizingWidth.set(i);
 }
 
@@ -455,6 +543,7 @@ export function equalSpacing(cProp: string, diProp: string): void {
 
     if ($selection.get().length < 3) return;
 
+    snapshot();
     $nodes.update(nodes0 => {
 
         $selection.update(selection => {
@@ -489,7 +578,8 @@ export function equalSpacing(cProp: string, diProp: string): void {
 export function rotateNodeType() {
     let selection = $selection.get();
     if (selection.length < 1) return;
-    
+
+    snapshot();
     $nodes.update(nodes0 => {
         nodes0.forEach((node,idx) => {
             if (selection.indexOf(idx) > -1) {
@@ -506,7 +596,8 @@ export function rotateNodeType() {
 export function rotateNodeSize() {
     let selection = $selection.get();
     if (selection.length < 1) return;
-    
+
+    snapshot();
     $nodes.update(nodes0 => {
         nodes0.forEach((node,idx) => {
             if (selection.indexOf(idx) > -1) {
@@ -523,6 +614,7 @@ export function mirror(cProp: string, diProp: string): void {
 
     if ($selection.get().length < 2) return;
 
+    snapshot();
     $nodes.update(nodes0 => {
 
         $selection.update(selection => {
@@ -554,6 +646,7 @@ function alignFirst(cProp: string, diProp: string): void {
     let selection = $selection.get();
     if (selection.length < 2) return;
 
+    snapshot();
     $nodes.update(nodes0 => {
 
         let min: number;
@@ -580,6 +673,7 @@ export function alignLast(cProp: string, diProp: string): void {
     let selection = $selection.get();
     if (selection.length < 2) return;
 
+    snapshot();
     $nodes.update(nodes0 => {
 
         let max: number;
@@ -604,6 +698,7 @@ export function center(cProp: string, diProp: string) {
 
     if ($selection.get().length < 2) return;
 
+    snapshot();
     $nodes.update(nodes0 => {
 
         $selection.update(selection => {
@@ -675,6 +770,7 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
     makeNodesMap($nodes.get());
 
     $selection.set([])
+    resetUndoHistory();
 
     makeLines();
     return true;
@@ -786,9 +882,11 @@ function loadContent(content: string, invalidMessage: string): boolean {
 }
 
 export function doExportToServer(): void {
-    exportToServer(JSON.stringify({
-        nodes: $nodes.get(), links: $links.get(), scene: $scene.get()
-    }));
+    const nodes = $nodes.get();
+    exportToServer(
+        JSON.stringify({ nodes, links: $links.get(), scene: $scene.get() }),
+        nodes.map((n) => n.text).filter(Boolean).join('\n')
+    );
 }
 
 export async function doImportFromServer(): Promise<void> {
@@ -829,6 +927,7 @@ export async function loadFromServer(name: string): Promise<void> {
 
 export function move(cProp: string, delta: number): void {
 
+    snapshot();
     $nodes.update(nodes0 => {
         $selection.get().forEach(i => nodes0[i][cProp] += delta);
         return nodes0;
@@ -842,6 +941,16 @@ async function keydown(e: KeyboardEvent): Promise<void> {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault();
         doExportToServer();
+        return;
+    }
+
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+            redo();
+        } else {
+            undo();
+        }
         return;
     }
 
@@ -903,6 +1012,7 @@ async function keydown(e: KeyboardEvent): Promise<void> {
 
         } else if (e.key === 'Backspace' && (e.metaKey || !$editing.get())) {
 
+            snapshot();
             let x = $nodes.get().length;
 
             while(x--) {
@@ -952,6 +1062,7 @@ async function keydown(e: KeyboardEvent): Promise<void> {
                 'ArrowLeft': 'left', 'ArrowRight': 'right',
             }
             const toggle = ((toggleDirection: Direction) => {
+                snapshot();
                 $links.update(links => {
                     links[selectedLink].direction = 
                     toggleArrows(links[selectedLink].direction, toggleDirection)
@@ -973,6 +1084,7 @@ async function keydown(e: KeyboardEvent): Promise<void> {
 
 export function lineDelete(i: number): void {
 
+    snapshot();
     $links.update(links => {
                 links.splice(i, 1);
                 return links;
@@ -1004,6 +1116,7 @@ export function colorChange(e: CustomEvent) {
     let c: {r:number, g:number, b:number, a:number} = e.detail;
     let hex = rgbAsHex([c.r, c.g, c.b, Math.round(c.a*255)]);
 
+    snapshot();
     if (selection.length > 0) {
         $nodes.update(nodes0 => {
             selection.forEach(i => nodes0[i].color = hex)
