@@ -13,11 +13,31 @@ const slotPromise: Promise<DocumentSlot> = import(/* @vite-ignore */ SLOT_URL).t
     ({ createDocumentSlot }) => createDocumentSlot({ tenantId: TENANT_ID })
 );
 
+// The hash holds a URL-encoded document name (mind-foo-app.ts's
+// folderfoo-file-open listener assigns window.location.hash = name with a
+// RAW, unencoded name - the browser itself auto-encodes any space/special
+// character on that assignment, so the hash as later READ back out is
+// percent-encoded even though nobody explicitly called
+// encodeURIComponent). decodeHash is the matching read side, same fix as
+// server-slot.js's own currentName() - without it, a document name with a
+// space (e.g. "tmp1/u:ux copy") round-trips through $serverName as the
+// literal string "tmp1/u:ux%20copy" and 404s, since that's not the file's
+// real name. Falls back to the raw value on a malformed percent-sequence
+// rather than throwing, so an old un-encoded bookmark/link still works.
+function decodeHash(raw: string): string | undefined {
+    if (!raw) return undefined;
+    try {
+        return decodeURIComponent(raw);
+    } catch {
+        return raw;
+    }
+}
+
 export const $serverName: Signal<string | undefined> = new Signal<string | undefined>(
-    window.location.hash.substring(1) || undefined
+    decodeHash(window.location.hash.substring(1))
 );
 window.addEventListener('hashchange', () => {
-    $serverName.set(window.location.hash.substring(1) || undefined);
+    $serverName.set(decodeHash(window.location.hash.substring(1)));
 });
 
 // body/return values here are JSON-encoded strings (store.ts's existing
