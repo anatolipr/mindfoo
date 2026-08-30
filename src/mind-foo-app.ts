@@ -83,7 +83,36 @@ export class MindFooApp extends LitElement {
             loadFromServer(name);
         };
         document.addEventListener('folderfoo-file-open', onFileOpen);
-        this.disposeFileOpen = () => document.removeEventListener('folderfoo-file-open', onFileOpen);
+
+        // A share-link redemption (remote.ts's redeemShareTokenFromUrl call)
+        // lands here the same way File Open does above - the only
+        // difference is the target name is "owner:path" (auth-guard.js's
+        // {owner, path, type} detail) rather than something the picker
+        // already round-tripped through e.detail.name. MindFoo has no
+        // folder browser (single-document-by-#hash, same as store.ts's
+        // loadFromServer), so a type:'folder' link has nothing to open here
+        // and is ignored; only type:'file' applies.
+        const onShareRedeemed = (e: Event) => {
+            const detail = (e as CustomEvent<{ owner: string; path: string; type: string }>).detail;
+            const { owner, path, type } = detail ?? { owner: '', path: '', type: '' };
+            if (type !== 'file' || !owner || !path) return;
+            const name = `${owner}:${path}`;
+            window.location.hash = name;
+            loadFromServer(name);
+        };
+        document.addEventListener('folderfoo-share-redeemed', onShareRedeemed);
+
+        const onShareRedeemFailed = (e: Event) => {
+            const message = (e as CustomEvent<{ message: string }>).detail?.message;
+            alert(message || 'This link is invalid or has expired.');
+        };
+        document.addEventListener('folderfoo-share-redeem-failed', onShareRedeemFailed);
+
+        this.disposeFileOpen = () => {
+            document.removeEventListener('folderfoo-file-open', onFileOpen);
+            document.removeEventListener('folderfoo-share-redeemed', onShareRedeemed);
+            document.removeEventListener('folderfoo-share-redeem-failed', onShareRedeemFailed);
+        };
 
         window.addEventListener('mousedown', bodyMouseDown);
         window.addEventListener('mouseup', mouseup);

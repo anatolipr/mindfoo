@@ -13,6 +13,22 @@ const slotPromise: Promise<DocumentSlot> = import(/* @vite-ignore */ SLOT_URL).t
     ({ createDocumentSlot }) => createDocumentSlot({ tenantId: TENANT_ID })
 );
 
+// server-slot.js only calls setTenantId lazily inside each save/load call,
+// so there's no single "startup" moment to hook off of there - talk to
+// auth-guard.js/api-client.js directly here instead, the same shape
+// bulletino-1's remote.mjs uses. Fire-and-forget: redeemShareTokenFromUrl
+// no-ops with no event at all if the page has no ?shareToken=, and reports
+// success/failure via "folderfoo-share-redeemed"/"folderfoo-share-redeem-
+// failed" window events (handled in mind-foo-app.ts) rather than a return
+// value, since nothing here awaits it.
+Promise.all([
+    import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/auth-guard.js`),
+    import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/api-client.js`),
+]).then(([authGuard, { setTenantId }]) => {
+    setTenantId(TENANT_ID);
+    authGuard.redeemShareTokenFromUrl();
+});
+
 // The hash holds a URL-encoded document name (mind-foo-app.ts's
 // folderfoo-file-open listener assigns window.location.hash = name with a
 // RAW, unencoded name - the browser itself auto-encodes any space/special
