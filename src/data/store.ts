@@ -889,25 +889,16 @@ export function doExportToServer(): void {
     );
 }
 
-export async function doImportFromServer(): Promise<void> {
-    if (!window.location.hash.substring(1)) {
-        alert('No target - add a #name to the URL before importing');
-        return;
-    }
-    let content: string | null;
-    try {
-        content = await importFromServer();
-    } catch (e) {
-        alert((e as { notFound?: boolean; message: string }).notFound
-            ? (e as Error).message
-            : `Import failed: ${(e as Error).message}`);
-        return;
-    }
-    if (!content) {
-        alert('empty response');
-        return;
-    }
-    loadContent(content, 'invalid format');
+// "Load from server" menu action - prompts for a document name the same
+// way a page load with no #hash would (see store.ts's init(), which just
+// no-ops rather than prompting), so this doubles as a way to jump to a
+// different document (which may or may not exist yet in folderfoo)
+// without reloading the page. Setting window.location.hash triggers the
+// actual load via $serverName's subscribe() in init() above.
+export function doImportFromServer(): void {
+    const name = prompt('Enter a document name to open:');
+    if (!name) return;
+    window.location.hash = name;
 }
 
 export async function loadFromServer(name: string): Promise<void> {

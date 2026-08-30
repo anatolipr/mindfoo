@@ -356,7 +356,7 @@ export class MindFooApp extends LitElement {
                 <button @click=${doExport}>export</button>
                 <button @click=${doImport}>import</button>
                 <button @click=${doExportToServer}>save to server</button>
-                <button @click=${doImportFromServer}>load from server</button>
+                <button @click=${doImportFromServer}>open</button>
                 ${selectedLinkValue > -1 ? html`
                     <button @click=${lineText}>line text</button>
                     <button @click=${rotateArrows}>arrows</button>
