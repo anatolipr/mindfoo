@@ -20,13 +20,18 @@ const slotPromise: Promise<DocumentSlot> = import(/* @vite-ignore */ SLOT_URL).t
 // no-ops with no event at all if the page has no ?shareToken=, and reports
 // success/failure via "folderfoo-share-redeemed"/"folderfoo-share-redeem-
 // failed" window events (handled in mind-foo-app.ts) rather than a return
-// value, since nothing here awaits it.
+// value, since nothing here awaits it. checkShareLinkJoins is the opposite
+// direction (did anyone join via MY links) - safe to call unconditionally
+// even for a logged-out visitor, see its own comment in auth-guard.js; it
+// reports via "folderfoo-share-links-joined", picked up by the
+// folderfoo-share-toast element mounted in mind-foo-app.ts.
 Promise.all([
     import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/auth-guard.js`),
     import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/api-client.js`),
 ]).then(([authGuard, { setTenantId }]) => {
     setTenantId(TENANT_ID);
     authGuard.redeemShareTokenFromUrl();
+    authGuard.checkShareLinkJoins();
 });
 
 // The hash holds a URL-encoded document name (mind-foo-app.ts's

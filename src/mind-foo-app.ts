@@ -76,6 +76,14 @@ export class MindFooApp extends LitElement {
             document.body.appendChild(el);
         });
 
+        // Toast for "someone joined via one of your share links" - see
+        // remote.ts's checkShareLinkJoins() call, which is what actually
+        // dispatches the event this listens for. Same best-effort mounting
+        // as the profile-circle widget above.
+        import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/folderfoo-share-toast.js`).then(() => {
+            document.body.appendChild(document.createElement('folderfoo-share-toast'));
+        });
+
         const onFileOpen = (e: Event) => {
             const name = (e as CustomEvent<{ name: string }>).detail?.name;
             if (!name) return;
