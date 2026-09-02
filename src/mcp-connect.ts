@@ -34,6 +34,10 @@ export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 // listener wiring.
 export const $mcpConnectionState: Signal<ConnectionState> = new Signal('disconnected');
 export const $mcpChannel: Signal<string> = new Signal('mindfoo');
+// Only meaningfully different from $mcpChannel when a "channel:app-name"
+// join was used to share a channel with other apps - mind-foo-app.ts
+// appends it to the displayed label in that case only.
+export const $mcpAppLabel: Signal<string> = new Signal('mindfoo');
 
 type ConnectApi = {
 	init(): Promise<void>;
@@ -48,14 +52,16 @@ const ready: Promise<ConnectApi | undefined> = import(/* @vite-ignore */ `${JSBR
 	.then((mod: { createMcpConnect(opts: { appName: string; onStateChange?: (s: ConnectionState, c: string, l: string) => void }): ConnectApi }) => {
 		real = mod.createMcpConnect({
 			appName: 'mindfoo',
-			onStateChange: (state, channel) => {
+			onStateChange: (state, channel, appLabel) => {
 				$mcpConnectionState.set(state);
 				$mcpChannel.set(channel);
+				$mcpAppLabel.set(appLabel);
 			},
 		});
 		const initial = real.getConnectionState();
 		$mcpConnectionState.set(initial.state);
 		$mcpChannel.set(initial.channel);
+		$mcpAppLabel.set(initial.appLabel);
 		return real;
 	})
 	.catch(() => undefined); // js-bridge-mcp unreachable - stays in the disconnected stub state

@@ -57,7 +57,7 @@ import type { Node } from './data/types';
 import { determineArrow } from './data/directions';
 import { makeShape } from './geo';
 import { FOLDERFOO_HOST, TENANT_ID } from './server-config';
-import { $mcpConnectionState, $mcpChannel, handleConnectClick } from './mcp-connect';
+import { $mcpConnectionState, $mcpChannel, $mcpAppLabel, handleConnectClick } from './mcp-connect';
 
 @customElement('mind-foo-app')
 export class MindFooApp extends LitElement {
@@ -377,7 +377,11 @@ export class MindFooApp extends LitElement {
                             : '⚪'
                     }</span>
                     <span>${
-                        $mcpConnectionState.get() === 'connected' ? $mcpChannel.get()
+                        $mcpConnectionState.get() === 'connected' ? (
+                            $mcpAppLabel.get() && $mcpAppLabel.get() !== $mcpChannel.get()
+                                ? `${$mcpChannel.get()}:${$mcpAppLabel.get()}`
+                                : $mcpChannel.get()
+                        )
                             : $mcpConnectionState.get() === 'connecting' ? 'connecting…'
                             : 'mcp'
                     }</span>
