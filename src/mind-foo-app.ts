@@ -369,7 +369,7 @@ export class MindFooApp extends LitElement {
                     <button @click=${rotateNodeSize}>size</button>
                 ` : nothing}
                 <button @click=${() => alert('MindFoo by Anatoli Radulov')}>about</button>
-                <button @click=${handleConnectClick} title="MCP bridge connection (click to rename channel once connected)"
+                <button @click=${handleConnectClick} title="MCP bridge connection (click to rename; type channel:app-name to join a shared channel)"
                     style="display: inline-flex; align-items: center; justify-content: center; gap: 0.4em;">
                     <span style="display: inline-flex;">${
                         $mcpConnectionState.get() === 'connected' ? '🟢'
