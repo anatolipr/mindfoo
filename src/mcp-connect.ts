@@ -2,19 +2,23 @@
 // client can discover/call window.__mcpTools (set up by mcpbridge.ts)
 // without a human pasting the embed snippet into DevTools.
 //
-// Thin per-app wrapper around js-bridge-mcp's own shared connect module
-// (packages/js-bridge-mcp/src/client/connect.js, served as connect.js) -
-// the actual probe/connect/rename/leave-old-channel lifecycle used to be
-// copy-pasted here (and in bulletino-1/htmlpaint's own mcp-connect files);
-// now it lives in one place so the three don't drift.
+// Thin per-app wrapper around js-bridge-mcp's own published SDK
+// (js-bridge-mcp/client, resolved from node_modules like any other
+// dependency) - the actual probe/connect/rename/leave-old-channel
+// lifecycle, plus automatic tool-bus loading, lives there so this project
+// doesn't hand-roll it.
 //
-// connect.js lives on js-bridge-mcp's own origin (no production deployment,
-// separate server) so it can only be reached via dynamic import() - and
-// this project's build target doesn't support top-level await, so the
-// module starts wired to synchronous Signals in a 'disconnected' stub state
-// and swaps to the real createMcpConnect() instance's own state once the
-// dynamic import resolves. mind-foo-app.ts only ever reads these Signals
-// reactively, so it doesn't need to know a swap happened.
+// Unlike the old connect.js dynamic-URL-import this replaces, js-bridge-mcp/
+// client is a normal bundled npm import - it resolves at build time
+// regardless of whether the js-bridge-mcp *server* happens to be running,
+// so no top-level-await/stub-swap dance is needed here anymore:
+// connectMcpBridge() returns its API object synchronously (mirroring
+// createMcpConnect's own shape), same as this module exposed before, just
+// without the intermediate Promise-of-a-stub. connectMcpBridge's internal
+// tool-bus load and this module's own init()/handleConnectClick() calls
+// still probe reachability and no-op gracefully if js-bridge-mcp isn't
+// running - that degrade-gracefully behavior is unchanged, just now lives
+// inside the SDK instead of this file's own .catch().
 //
 // Connection identity is a named CHANNEL, not a session-minted tenant UUID:
 // js-bridge-mcp's channel support (mcp-tenant-lib 0.3.3+) makes a channel
@@ -24,8 +28,7 @@
 // to the exact same live connection via join_channel("mindfoo").
 
 import { Signal } from 'avosignals';
-
-const JSBRIDGE_HOST = 'http://localhost:8766';
+import { connectMcpBridge } from 'js-bridge-mcp/client';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
@@ -39,44 +42,29 @@ export const $mcpChannel: Signal<string> = new Signal('mindfoo');
 // appends it to the displayed label in that case only.
 export const $mcpAppLabel: Signal<string> = new Signal('mindfoo');
 
-type ConnectApi = {
-	init(): Promise<void>;
-	handleConnectClick(): Promise<void>;
-	onConnectionStateChange(cb: (state: ConnectionState, channel: string, appLabel: string) => void): () => void;
-	getConnectionState(): { state: ConnectionState; channel: string; appLabel: string };
-};
+const connect = connectMcpBridge({
+	appName: 'mindfoo',
+	onStateChange: (state, channel, appLabel) => {
+		$mcpConnectionState.set(state as ConnectionState);
+		$mcpChannel.set(channel);
+		$mcpAppLabel.set(appLabel);
+	},
+});
 
-let real: ConnectApi | undefined;
-
-const ready: Promise<ConnectApi | undefined> = import(/* @vite-ignore */ `${JSBRIDGE_HOST}/connect.js`)
-	.then((mod: { createMcpConnect(opts: { appName: string; onStateChange?: (s: ConnectionState, c: string, l: string) => void }): ConnectApi }) => {
-		real = mod.createMcpConnect({
-			appName: 'mindfoo',
-			onStateChange: (state, channel, appLabel) => {
-				$mcpConnectionState.set(state);
-				$mcpChannel.set(channel);
-				$mcpAppLabel.set(appLabel);
-			},
-		});
-		const initial = real.getConnectionState();
-		$mcpConnectionState.set(initial.state);
-		$mcpChannel.set(initial.channel);
-		$mcpAppLabel.set(initial.appLabel);
-		return real;
-	})
-	.catch(() => undefined); // js-bridge-mcp unreachable - stays in the disconnected stub state
+const initial = connect.getConnectionState();
+$mcpConnectionState.set(initial.state as ConnectionState);
+$mcpChannel.set(initial.channel);
+$mcpAppLabel.set(initial.appLabel);
 
 // Click behavior: connect (or reconnect) if not connected; if already
 // connected, prompt to rename (accepts "channel" or "channel:app-name").
 export async function handleConnectClick(): Promise<void> {
-	const api = real ?? (await ready);
-	await api?.handleConnectClick();
+	await connect.handleConnectClick();
 }
 
 // Connects automatically on page load - no button click required. The
 // Connect button (wired in mind-foo-app.ts) is only for reconnecting after a
 // failed probe or renaming the channel.
 export async function initMcpConnect(): Promise<void> {
-	const api = await ready;
-	await api?.init();
+	await connect.init();
 }

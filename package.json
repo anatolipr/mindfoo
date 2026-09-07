@@ -12,6 +12,7 @@
   "dependencies": {
     "avos": "1.0.16",
     "avosignals": "^1.0.16",
+    "js-bridge-mcp": "^0.3.0",
     "lit": "^3.3.3",
     "nanoid": "^5.0.6",
     "path-intersection": "3.1.0"
