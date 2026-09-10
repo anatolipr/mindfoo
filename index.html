@@ -9,5 +9,11 @@
   <body class="dark">
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
+
+    <!-- Human-relay MCP popup (Cmd/Ctrl+Shift+A) - lets a human manually
+         relay MCP tool calls into a chat session with no direct MCP
+         connection, by reading window.__mcpTools (set in src/mcpbridge.ts).
+         See https://www.npmjs.com/package/human-mcp-relay -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/human-mcp-relay@0/src/relay.js"></script>
   </body>
 </html>
