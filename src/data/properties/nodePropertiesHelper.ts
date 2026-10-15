@@ -8,7 +8,8 @@ export const types: NodeType[] = [
     NodeType.circle, 
     NodeType.ellipse, 
     NodeType.rhombus, 
-    NodeType.parallelogram];
+    NodeType.parallelogram,
+    NodeType.text];
 
 export const sizes: NodeFontSize[] = ['15px' , '20px' , '25px' , '30px']
 

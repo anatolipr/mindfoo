@@ -33,6 +33,8 @@ export const NODE_FIELDS: Record<string, FieldSpec> = {
 	text: { type: 'string', required: false },
 	size: { type: 'enum', values: ['15px', '20px', '25px', '30px'], required: false },
 	type: { type: 'number', required: false },
+	collapsed: { type: 'boolean', required: false },
+	groupId: { type: 'string', required: false },
 };
 
 export const LINK_FIELDS: Record<string, FieldSpec> = {
@@ -44,6 +46,10 @@ export const LINK_FIELDS: Record<string, FieldSpec> = {
 	width: { type: 'number', required: false },
 	text: { type: 'string', required: false },
 	textSize: { type: 'string', required: false },
+	route: { type: 'enum', values: ['curve', 'straight', 'elbow'], required: false },
+	bend: { type: 'number', required: false },
+	labelPos: { type: 'enum', values: ['start', 'middle', 'end'], required: false },
+	labelBox: { type: 'boolean', required: false },
 };
 
 function typeMatches(value: any, spec: FieldSpec): boolean {

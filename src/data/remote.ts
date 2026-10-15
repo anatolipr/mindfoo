@@ -1,5 +1,6 @@
 import { Signal } from 'avosignals';
 import { FOLDERFOO_HOST, TENANT_ID } from '../server-config';
+import { toast } from '../ui/toast';
 
 interface DocumentSlot {
     readonly currentName: string | undefined;
@@ -76,11 +77,12 @@ window.addEventListener('hashchange', () => {
 // Best-effort and independent of the save itself: a failed/omitted index
 // post never affects the save, and the document stays findable by name
 // either way (see folderfoo's GET /files ?q= filename fallback).
-export async function exportToServer(body: string, searchText?: string): Promise<void> {
+// Resolves true when the document was saved, false when the save failed.
+export async function exportToServer(body: string, searchText?: string): Promise<boolean> {
     const slot = await slotPromise;
     try {
         const name = await slot.save(body);
-        alert(`Exported to ${name}`);
+        toast(`Saved as ${name}`, 'success');
         if (searchText) {
             try {
                 await slot.saveSearchText(searchText, name);
@@ -89,8 +91,10 @@ export async function exportToServer(body: string, searchText?: string): Promise
                 // to filename-only search for this document
             }
         }
+        return true;
     } catch (e) {
-        alert((e as Error).message);
+        toast((e as Error).message, 'error');
+        return false;
     }
 }
 

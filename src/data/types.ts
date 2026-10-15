@@ -9,7 +9,9 @@ export enum NodeType {
     roundrect, rect, 
     circle, ellipse, 
     rhombus, 
-    parallelogram
+    parallelogram,
+    // no outline: free text on the canvas
+    text
 }
 
 export type NodeFontSize = '15px' | '20px' | '25px' | '30px';
@@ -27,8 +29,33 @@ export type Node = {
     color:  string,
     text:   string,
     size?:   NodeFontSize,
-    type?:  NodeType
+    type?:  NodeType,
+    // hides every node reachable through this node's outgoing links
+    collapsed?: boolean,
+    // nodes sharing a groupId select and move together
+    groupId?: string
 } & {[key: string]: any}
+
+// 'free': positions are the user's. Every other mode computes positions
+// from the link tree on each change (see layout.ts).
+export type LayoutMode = 'free' | 'mindmap' | 'right' | 'down' | 'radial';
+
+// Freehand ink, in scene coordinates. points: flat [x0, y0, x1, y1, ...].
+export type Stroke = {
+    id: string,
+    points: number[],
+    color: string,
+    width: number,
+    kind: 'pen' | 'highlighter'
+}
+
+// A titled box drawn around its member nodes; it follows them.
+export type Frame = {
+    id: string,
+    title: string,
+    nodeIds: NodeId[],
+    color?: string
+}
 
 
 
@@ -64,8 +91,22 @@ export type Link = {
     color?: string,
     width?: Width,
     text?: string,
-    textSize?: string
+    textSize?: string,
+    // path shape; unset = the document default
+    route?: LinkRoute,
+    // how far the middle is pulled sideways (curve/straight) or the cross
+    // segment is shifted (elbow), in scene px
+    bend?: number,
+    // label placement along the link (start = link.one end), and whether it
+    // sits in a box on the line instead of running along it
+    labelPos?: LabelPos,
+    labelBox?: boolean
 }
+
+export type LabelPos = 'start' | 'middle' | 'end';
+export const LABEL_FRACTION: Record<LabelPos, number> = { start: 0.2, middle: 0.5, end: 0.8 };
+
+export type LinkRoute = 'curve' | 'straight' | 'elbow';
 
 /**
  * actual line for a Link
@@ -80,7 +121,17 @@ export type Line = {
      */
     c: string,
 
-    reverse: boolean
+    reverse: boolean,
+    // an end node is hidden (collapsed branch or presenter step)
+    hidden?: boolean,
+    // where the path starts (at link.one) and ends (at link.two), and the
+    // bend handle with the direction it moves in
+    start?: Coordinates,
+    end?: Coordinates,
+    handle?: Coordinates,
+    normal?: Coordinates,
+    // where the label goes (labelPos along the path)
+    labelAt?: Coordinates
 }
 
 export type Coordinates = {

@@ -1,5 +1,7 @@
 html, body {
 	position: relative;
+	/* the canvas maps pointer to scene coordinates from the page origin */
+	margin: 0;
 	width: 100%;
 	height: 100%;
 	box-sizing: border-box;
@@ -63,4 +65,44 @@ folderfoo-profile-circle {
 	top: 16px;
 	right: 16px;
 	z-index: 2147483000;
+}
+
+body {
+	--accent: #1277d2;
+	--menu-bg: #ffffff;
+	--menu-fg: hsl(0, 0%, 13%);
+	--menu-sep: hsl(0, 0%, 85%);
+}
+
+body.dark {
+	--menu-bg: hsl(0, 0%, 24%);
+	--menu-fg: hsl(0, 0%, 92%);
+	--menu-sep: hsl(0, 0%, 36%);
+}
+
+/* Space held: canvas can be dragged */
+body.mf-pan-ready {
+	cursor: grab;
+}
+
+body.mf-panning {
+	cursor: grabbing;
+}
+
+/* pen, highlighter, eraser */
+body.mf-inking {
+	cursor: crosshair;
+}
+
+/* the presenter overlay draws a laser dot instead */
+body.mf-presenting {
+	cursor: none;
+}
+
+/* touch and pen gestures are handled by the app (src/app/touch.ts), not
+   by browser scrolling, zooming or text-selection callouts */
+html, body {
+	touch-action: none;
+	-webkit-touch-callout: none;
+	overscroll-behavior: none;
 }

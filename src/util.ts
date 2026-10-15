@@ -45,3 +45,41 @@ export function selectText(element: HTMLElement): void {
       selection?.addRange(range);
   }
 }
+
+// Node text is user HTML (contenteditable) rendered via innerHTML, and
+// documents can come from other people (share links, MCP agents). Keep only
+// plain formatting tags, drop every attribute, and drop script-capable
+// containers outright. DOMParser documents are inert, so nothing executes
+// while this runs. Output uses the browser's own serialization, so
+// sanitizeHtml(sanitizeHtml(x)) === sanitizeHtml(x).
+const ALLOWED_TAGS = new Set(['B', 'I', 'U', 'S', 'EM', 'STRONG', 'BR', 'DIV', 'P', 'SPAN', 'UL', 'OL', 'LI', 'SUB', 'SUP', 'CODE', 'PRE']);
+const DROPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'TEMPLATE', 'NOSCRIPT', 'SVG', 'MATH']);
+const sanitizeCache = new Map<string, string>();
+
+function cleanChildren(parent: Element): void {
+  for (const child of Array.from(parent.childNodes)) {
+    if (child.nodeType === 3) continue; // text
+    if (child.nodeType !== 1) { child.parentNode?.removeChild(child); continue; }
+    const el = child as Element;
+    const tag = el.tagName.toUpperCase();
+    if (DROPPED_TAGS.has(tag)) { el.remove(); continue; }
+    cleanChildren(el);
+    if (ALLOWED_TAGS.has(tag)) {
+      for (const attr of Array.from(el.attributes)) el.removeAttribute(attr.name);
+    } else {
+      el.replaceWith(...Array.from(el.childNodes));
+    }
+  }
+}
+
+export function sanitizeHtml(html: string): string {
+  if (!html) return '';
+  const cached = sanitizeCache.get(html);
+  if (cached !== undefined) return cached;
+  const body = new DOMParser().parseFromString(html, 'text/html').body;
+  cleanChildren(body);
+  const out = body.innerHTML;
+  if (sanitizeCache.size > 2000) sanitizeCache.clear();
+  sanitizeCache.set(html, out);
+  return out;
+}
