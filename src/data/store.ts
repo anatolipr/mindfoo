@@ -1780,6 +1780,15 @@ export async function doImportFromServer(): Promise<void> {
     window.location.hash = name;
 }
 
+// Loads a document someone shared through a public link. It isn't the
+// visitor's document: the hash/server name are cleared, so a save makes the
+// visitor their own copy instead of addressing the owner's file.
+export async function loadSharedDocument(content: string): Promise<void> {
+    if (window.location.hash) history.replaceState(null, '', window.location.pathname + window.location.search);
+    $serverName.set(undefined);
+    await loadContent(content, 'Invalid document format');
+}
+
 export async function loadFromServer(name: string): Promise<void> {
     let content: string | null;
     try {

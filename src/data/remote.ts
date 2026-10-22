@@ -26,14 +26,63 @@ const slotPromise: Promise<DocumentSlot> = import(/* @vite-ignore */ SLOT_URL).t
 // even for a logged-out visitor, see its own comment in auth-guard.js; it
 // reports via "folderfoo-share-links-joined", picked up by the
 // folderfoo-share-toast element mounted in mind-foo-app.ts.
-Promise.all([
+// A `?publicToken=` link (folderfoo's no-account "anyone with the link can
+// view" share) - read once here, then stripped from the URL so a reload or a
+// later save never carries it along. mind-foo-app.ts loads it (see
+// loadPublicLink) instead of redeeming anything: a public view needs no login.
+const publicTokenUrl = new URL(window.location.href);
+export const publicToken = publicTokenUrl.searchParams.get('publicToken');
+if (publicToken) {
+    publicTokenUrl.searchParams.delete('publicToken');
+    window.history.replaceState(null, '', publicTokenUrl.toString());
+}
+
+interface AuthGuard {
+    redeemShareTokenFromUrl(): void;
+    checkShareLinkJoins(): void;
+    getPublicLink(token: string): Promise<PublicLinkView>;
+    getPublicFolderFile(token: string, relPath: string): Promise<Response>;
+}
+
+export interface PublicLinkView {
+    owner: string;
+    path: string;
+    type: 'file' | 'folder';
+    content?: unknown;
+    files?: Array<{ name: string; folderPath: string }>;
+}
+
+const authGuardPromise: Promise<AuthGuard> = Promise.all([
     import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/auth-guard.js`),
     import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/api-client.js`),
 ]).then(([authGuard, { setTenantId }]) => {
     setTenantId(TENANT_ID);
-    authGuard.redeemShareTokenFromUrl();
-    authGuard.checkShareLinkJoins();
+    // A public view has nothing to redeem and no session to check.
+    if (!publicToken) {
+        authGuard.redeemShareTokenFromUrl();
+        authGuard.checkShareLinkJoins();
+    }
+    return authGuard as AuthGuard;
 });
+
+// Resolves a public link: a file link's document (the same JSON string
+// importFromServer returns), or a folder link's listing.
+export async function loadPublicLink(token: string): Promise<PublicLinkView> {
+    return (await authGuardPromise).getPublicLink(token);
+}
+
+// One document inside a public FOLDER link. Documents are stored in
+// folderfoo's JSON form, so the stored text is the JSON encoding of the
+// document string - decoded once here, matching importFromServer's result.
+export async function loadPublicFolderDocument(token: string, relPath: string): Promise<string | null> {
+    const text = await (await (await authGuardPromise).getPublicFolderFile(token, relPath)).text();
+    try {
+        const decoded = JSON.parse(text);
+        return typeof decoded === 'string' ? decoded : text;
+    } catch {
+        return text;
+    }
+}
 
 // The hash holds a URL-encoded document name (mind-foo-app.ts's
 // folderfoo-file-open listener assigns window.location.hash = name with a

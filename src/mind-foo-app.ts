@@ -43,6 +43,7 @@ import {
     startResizeWidth,
     colorChange,
     loadFromServer,
+    loadSharedDocument,
     undo,
     redo,
     bodyMouseDown,
@@ -110,6 +111,7 @@ import type { Line, Link, Node } from './data/types';
 import { determineArrow } from './data/directions';
 import { makeShape } from './geo';
 import { FOLDERFOO_HOST, TENANT_ID } from './server-config';
+import { publicToken, loadPublicLink, loadPublicFolderDocument } from './data/remote';
 import { $mcpConnectionState, $mcpChannel, $mcpAppLabel, handleConnectClick } from './mcp-connect';
 
 const SWATCHES = ['#ffffff', '#f8d7da', '#ffe8cc', '#fff3bf', '#d3f9d8', '#d0ebff', '#e5dbff', '#dee2e6',
@@ -181,6 +183,62 @@ const SHORTCUTS: [string, [string, string][]][] = [
     ]],
 ];
 
+// Opens a public ("anyone with the link") share - no account needed. A file
+// link loads its document; a folder link lists its documents in a small
+// panel and loads the first. Either way the document is the visitor's own
+// working copy (see store.ts's loadSharedDocument): saving never touches the
+// owner's file.
+async function openPublicLink(token: string): Promise<void> {
+    try {
+        const view = await loadPublicLink(token);
+        if (view.type === 'file') {
+            if (typeof view.content === 'string') await loadSharedDocument(view.content);
+            toast(`Viewing ${view.path} shared by ${view.owner}`, 'info');
+            return;
+        }
+        const docs = (view.files ?? []).map((f) => (f.folderPath ? `${f.folderPath}/${f.name}` : f.name)).sort();
+        showPublicFolderPanel(token, view, docs);
+    } catch (e) {
+        toast((e as Error).message || 'This link is invalid or has expired.', 'error');
+    }
+}
+
+function showPublicFolderPanel(token: string, view: { owner: string; path: string }, docs: string[]): void {
+    const panel = document.createElement('nav');
+    panel.setAttribute('aria-label', `Documents in ${view.path}`);
+    Object.assign(panel.style, {
+        position: 'fixed', left: '16px', bottom: '16px', zIndex: '2147483000', maxWidth: 'min(320px, calc(100vw - 32px))',
+        maxHeight: '40vh', overflowY: 'auto', padding: '8px', borderRadius: '8px', font: '13px system-ui, sans-serif',
+        background: 'var(--bg-1, #fff)', color: 'var(--fg-1, #222)', border: '1px solid var(--fg-3, #ccc)',
+        boxShadow: '0 6px 24px rgba(0,0,0,0.2)',
+    });
+    const title = document.createElement('div');
+    title.textContent = `${view.path} — shared by ${view.owner}`;
+    title.style.cssText = 'font-weight:600;margin-bottom:6px';
+    panel.append(title);
+    const open = async (relPath: string, button: HTMLButtonElement) => {
+        for (const b of panel.querySelectorAll('button')) b.style.fontWeight = b === button ? '600' : '400';
+        try {
+            const content = await loadPublicFolderDocument(token, relPath);
+            if (content) await loadSharedDocument(content);
+        } catch (e) {
+            toast((e as Error).message, 'error');
+        }
+    };
+    for (const relPath of docs) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = relPath;
+        button.style.cssText = 'display:block;width:100%;text-align:left;background:none;border:none;color:inherit;padding:3px 4px;cursor:pointer;font:inherit';
+        button.addEventListener('click', () => open(relPath, button));
+        panel.append(button);
+    }
+    if (docs.length === 0) panel.append(Object.assign(document.createElement('div'), { textContent: 'No documents in this folder.' }));
+    document.body.append(panel);
+    const first = panel.querySelector('button');
+    if (first) void open(docs[0]!, first);
+}
+
 @customElement('mind-foo-app')
 export class MindFooApp extends LitElement {
     private watcher = new SignalWatcher(this);
@@ -196,8 +254,11 @@ export class MindFooApp extends LitElement {
             const el = document.createElement('folderfoo-profile-circle');
             el.setAttribute('app-name', 'MindFoo');
             el.setAttribute('tenant-id', TENANT_ID);
+            // A redeemed folder share link opens File Open inside that folder.
+            el.setAttribute('open-shared-folders', '');
             document.body.appendChild(el);
         });
+        if (publicToken) void openPublicLink(publicToken);
 
         // Toast for "someone joined via one of your share links" - see
         // remote.ts's checkShareLinkJoins() call, which is what actually
@@ -221,8 +282,10 @@ export class MindFooApp extends LitElement {
         // {owner, path, type} detail) rather than something the picker
         // already round-tripped through e.detail.name. MindFoo has no
         // folder browser (single-document-by-#hash, same as store.ts's
-        // loadFromServer), so a type:'folder' link has nothing to open here
-        // and is ignored; only type:'file' applies.
+        // loadFromServer), so a type:'folder' link is left to
+        // folderfoo-profile-circle, which opens File Open inside that folder
+        // (its open-shared-folders attribute, set above); only type:'file'
+        // is handled here.
         const onShareRedeemed = (e: Event) => {
             const detail = (e as CustomEvent<{ owner: string; path: string; type: string }>).detail;
             const { owner, path, type } = detail ?? { owner: '', path: '', type: '' };
