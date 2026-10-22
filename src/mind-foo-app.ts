@@ -623,9 +623,17 @@ export class MindFooApp extends LitElement {
             stroke-dasharray: 4;
         }
 
-        .line:hover {
-            stroke-opacity: 0.5;
+        .line-hit {
+            pointer-events: stroke;
             cursor: pointer;
+        }
+
+        .line {
+            pointer-events: none;
+        }
+
+        .line-hit:hover + .line {
+            stroke-opacity: 0.5;
         }
 
         .lineSelected {
@@ -874,11 +882,14 @@ export class MindFooApp extends LitElement {
                         if (line.hidden) return nothing;
                         const faded = link && (dim(link.one) || dim(link.two));
                         return svg`<g opacity=${faded ? 0.15 : 1}>
-                            <path role="none" id="path${i}"
-                                class="${classMap({ line: true, lineSelected: i === selectedLinkValue })}"
+                            <path role="none" class="line-hit" d=${line.c} fill="none" stroke="transparent"
+                                stroke-width=${Math.max(link?.width || 2, 14 / zoomValue)}
                                 @mousedown=${(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); lineClick(i); }}
                                 @contextmenu=${(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); openLineMenu(i, e); }}
                                 @dblclick=${(e: MouseEvent) => { e.stopPropagation(); lineClick(i, true); }}
+                            />
+                            <path role="none" id="path${i}"
+                                class="${classMap({ line: true, lineSelected: i === selectedLinkValue })}"
                                 fill="none"
                                 stroke=${link?.color || 'var(--fg-2)'}
                                 stroke-width=${link?.width || 2}
