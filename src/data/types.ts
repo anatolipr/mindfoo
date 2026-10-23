@@ -108,6 +108,12 @@ export const LABEL_FRACTION: Record<LabelPos, number> = { start: 0.2, middle: 0.
 
 export type LinkRoute = 'curve' | 'straight' | 'elbow';
 
+// Where curved and straight links meet their nodes: the middle of the facing
+// sides, the nearest point of the outline, or aimed at the center and cut
+// off at the outline.
+export type LinkEnds = 'sides' | 'edge' | 'center';
+export const LINK_ENDS: LinkEnds[] = ['sides', 'edge', 'center'];
+
 /**
  * actual line for a Link
  */

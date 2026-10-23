@@ -8,7 +8,7 @@ import { lineCurveFactor } from './consts';
 import intersect from "path-intersection"
 import { deCasteljau, makeCurve, makeShape } from '../geo';
 import { determineNextDirection, toggleArrows, type Direction } from './directions';
-import { NodeType, type NodeFontSize, type Dash, type Width, type LayoutMode, type Stroke, type Frame, type LinkRoute } from './types';
+import { NodeType, type NodeFontSize, type Dash, type Width, type LayoutMode, type Stroke, type Frame, type LinkRoute, type LinkEnds, LINK_ENDS } from './types';
 import { elbowPoints, roundedPolyline, cubicPoint, normalOf, bendFromPoint, polylinePoint, type Pt } from './linkGeometry';
 import { LABEL_FRACTION, type LabelPos } from './types';
 import { buildTree, computeLayout, preorder, DEFAULT_SPACING, type Spacing } from './layout';
@@ -51,6 +51,8 @@ export const $selecting: Signal<boolean> = new Signal(false);
 export const $layout: Signal<LayoutMode> = new Signal<LayoutMode>('free');
 // Route for links that don't set their own, saved with the document.
 export const $linkRoute: Signal<LinkRoute> = new Signal<LinkRoute>('curve');
+// Where links meet their nodes, saved with the document.
+export const $linkEnds: Signal<LinkEnds> = new Signal<LinkEnds>('sides');
 // Dragging a selected link's end onto another node, or its bend handle.
 export const $endDrag: Signal<{ index: number; end: 'one' | 'two' } | null> =
     new Signal<{ index: number; end: 'one' | 'two' } | null>(null);
@@ -117,7 +119,7 @@ export const $menu: Signal<string> = new Signal('');
 
 type DocSnapshot = {
     nodes: Node[]; links: Link[]; scene: Coordinates;
-    layout: LayoutMode; strokes: Stroke[]; frames: Frame[]; spacing: Spacing; linkRoute: LinkRoute;
+    layout: LayoutMode; strokes: Stroke[]; frames: Frame[]; spacing: Spacing; linkRoute: LinkRoute; linkEnds: LinkEnds;
 };
 
 let undoStack: DocSnapshot[] = [];
@@ -127,7 +129,7 @@ function currentSnapshot(): DocSnapshot {
     return structuredClone({
         nodes: $nodes.get(), links: $links.get(), scene: $scene.get(),
         layout: $layout.get(), strokes: $strokes.get(), frames: $frames.get(), spacing: $spacing.get(),
-        linkRoute: $linkRoute.get(),
+        linkRoute: $linkRoute.get(), linkEnds: $linkEnds.get(),
     });
 }
 
@@ -143,6 +145,7 @@ function restoreSnapshot(snap: DocSnapshot): void {
     $layout.set(snap.layout);
     $spacing.set(snap.spacing ?? { ...DEFAULT_SPACING });
     $linkRoute.set(snap.linkRoute ?? 'curve');
+    $linkEnds.set(snap.linkEnds ?? 'sides');
     $strokes.set(snap.strokes);
     $frames.set(snap.frames);
     makeNodesMap($nodes.get());
@@ -207,7 +210,7 @@ export function documentJson(): string {
     return JSON.stringify({
         nodes: $nodes.get(), links: $links.get(), scene: $scene.get(), zoom: $zoom.get(),
         layout: $layout.get(), strokes: $strokes.get(), frames: $frames.get(), spacing: $spacing.get(),
-        linkRoute: $linkRoute.get(),
+        linkRoute: $linkRoute.get(), linkEnds: $linkEnds.get(),
     });
 }
 
@@ -301,7 +304,7 @@ export function init() {
         restoreAutosave();
     }
 
-    const disposeAutosave = [$nodes, $links, $scene, $zoom, $layout, $strokes, $frames, $spacing, $linkRoute]
+    const disposeAutosave = [$nodes, $links, $scene, $zoom, $layout, $strokes, $frames, $spacing, $linkRoute, $linkEnds]
         .map(s => s.subscribe(scheduleAutosave));
 
     // $serverName tracks window.location.hash (see remote.ts); react to it
@@ -336,6 +339,7 @@ export async function newFile(): Promise<void> {
     $layout.set('free');
     $spacing.set({ ...DEFAULT_SPACING });
     $linkRoute.set('curve');
+    $linkEnds.set('sides');
     $strokes.set([]);
     $frames.set([]);
     $presenting.set(false);
@@ -647,6 +651,19 @@ function clipToShape(node: Node, toward: Pt): Pt {
         Math.hypot(h.x - toward.x, h.y - toward.y) < Math.hypot(best.x - toward.x, best.y - toward.y) ? h : best, hits[0]);
 }
 
+// The closest pair of points on the bounding boxes of two nodes. Where the
+// boxes overlap along an axis, both points sit at the middle of the overlap.
+function nearestBoxPoints(a: Node, b: Node): [Pt, Pt] {
+    const axis = (ac: number, ah: number, bc: number, bh: number): [number, number] => {
+        const lo = Math.max(ac - ah, bc - bh), hi = Math.min(ac + ah, bc + bh);
+        if (lo <= hi) return [(lo + hi) / 2, (lo + hi) / 2];
+        return ac < bc ? [ac + ah, bc - bh] : [ac - ah, bc + bh];
+    };
+    const [ax, bx] = axis(a.x, a.width / 2, b.x, b.width / 2);
+    const [ay, by] = axis(a.y, a.height / 2, b.y, b.height / 2);
+    return [{ x: ax, y: ay }, { x: bx, y: by }];
+}
+
 // Path of one link, always running from link.one (a) to link.two (b), so
 // 'left' arrows sit at link.one and 'right' arrows at link.two.
 function routeLink(link: Link, a: Node, b: Node, i: number, spread: number, layout: LayoutMode): Line {
@@ -670,28 +687,45 @@ function routeLink(link: Link, a: Node, b: Node, i: number, spread: number, layo
         };
     }
 
-    const n = normalOf(a, b);
+    // radial aims center to center: facing sides make no sense there
+    const ends = layout === 'radial' && $linkEnds.get() === 'sides' ? 'center' : $linkEnds.get();
+    let p: Pt = a, q: Pt = b;
+    if (ends === 'sides') {
+        // bottom middle to top middle, or right middle to left middle
+        const s = Math.sign(vertical ? dy : dx) || 1;
+        p = vertical ? { x: a.x, y: a.y + s * a.height / 2 } : { x: a.x + s * a.width / 2, y: a.y };
+        q = vertical ? { x: b.x, y: b.y - s * b.height / 2 } : { x: b.x - s * b.width / 2, y: b.y };
+    } else if (ends === 'edge') {
+        [p, q] = nearestBoxPoints(a, b);
+        p = clipToShape(a, p);
+        q = clipToShape(b, q);
+    }
+    const ex = q.x - p.x, ey = q.y - p.y;
+
+    const n = normalOf(p, q);
     let c: number[][];
     if (route === 'straight') {
-        c = [[a.x, a.y], [a.x + dx / 3, a.y + dy / 3], [a.x + dx * 2 / 3, a.y + dy * 2 / 3], [b.x, b.y]];
+        c = [[p.x, p.y], [p.x + ex / 3, p.y + ey / 3], [p.x + ex * 2 / 3, p.y + ey * 2 / 3], [q.x, q.y]];
         c[1] = [c[1][0] + n.x * spread, c[1][1] + n.y * spread];
         c[2] = [c[2][0] + n.x * spread, c[2][1] + n.y * spread];
     } else if (vertical) {
-        c = [[a.x, a.y], [a.x + spread, a.y + dy * (1 - lineCurveFactor)], [b.x + spread, a.y + dy * lineCurveFactor], [b.x, b.y]];
+        c = [[p.x, p.y], [p.x + spread, p.y + ey * (1 - lineCurveFactor)], [q.x + spread, p.y + ey * lineCurveFactor], [q.x, q.y]];
     } else {
-        c = [[a.x, a.y], [a.x + dx * (1 - lineCurveFactor), a.y + spread], [a.x + dx * lineCurveFactor, b.y + spread], [b.x, b.y]];
+        c = [[p.x, p.y], [p.x + ex * (1 - lineCurveFactor), p.y + spread], [p.x + ex * lineCurveFactor, q.y + spread], [q.x, q.y]];
     }
     // both control points move by bend / 0.75, which moves the midpoint by bend
     const shift = bend / 0.75;
     c[1] = [c[1][0] + n.x * shift, c[1][1] + n.y * shift];
     c[2] = [c[2][0] + n.x * shift, c[2][1] + n.y * shift];
 
-    let hits = intersect(makeCurve(c), makeShape(b));
-    if (hits && hits[0]) c = deCasteljau(c, hits[0].t1);
-    let back = [...c].reverse();
-    hits = intersect(makeCurve(back), makeShape(a));
-    if (hits && hits[0]) back = deCasteljau(back, hits[0].t1);
-    c = back.reverse();
+    if (ends === 'center') {
+        let hits = intersect(makeCurve(c), makeShape(b));
+        if (hits && hits[0]) c = deCasteljau(c, hits[0].t1);
+        let back = [...c].reverse();
+        hits = intersect(makeCurve(back), makeShape(a));
+        if (hits && hits[0]) back = deCasteljau(back, hits[0].t1);
+        c = back.reverse();
+    }
 
     return {
         id, c: makeCurve(c), reverse: false,
@@ -1084,6 +1118,13 @@ export function setDefaultLinkRoute(route: LinkRoute): void {
     if (route === $linkRoute.get()) return;
     snapshot();
     $linkRoute.set(route);
+    makeLines();
+}
+
+export function setLinkEnds(ends: LinkEnds): void {
+    if (ends === $linkEnds.get()) return;
+    snapshot();
+    $linkEnds.set(ends);
     makeLines();
 }
 
@@ -1613,6 +1654,7 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
     $spacing.set(parsed.spacing && typeof parsed.spacing.level === 'number' && typeof parsed.spacing.sibling === 'number'
         ? { level: parsed.spacing.level, sibling: parsed.spacing.sibling } : { ...DEFAULT_SPACING });
     $linkRoute.set(['curve', 'straight', 'elbow'].includes(parsed.linkRoute as string) ? parsed.linkRoute! : 'curve');
+    $linkEnds.set(LINK_ENDS.includes(parsed.linkEnds as LinkEnds) ? parsed.linkEnds! : 'sides');
     $strokes.set(Array.isArray(parsed.strokes) ? parsed.strokes.filter(validStroke) : []);
     $frames.set(Array.isArray(parsed.frames) ? parsed.frames.filter(validFrame) : []);
     $presenting.set(false);
@@ -1630,7 +1672,7 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
 
 type ParsedDocument = {
     nodes: Node[], links: Link[], scene?: {x: number, y: number}, zoom?: number,
-    layout?: LayoutMode, strokes?: Stroke[], frames?: Frame[], spacing?: Spacing, linkRoute?: LinkRoute,
+    layout?: LayoutMode, strokes?: Stroke[], frames?: Frame[], spacing?: Spacing, linkRoute?: LinkRoute, linkEnds?: LinkEnds,
 };
 
 function validStroke(s: any): s is Stroke {
@@ -1737,7 +1779,8 @@ async function loadContent(content: string, invalidMessage: string): Promise<boo
     const currentIsEmpty = currentNodes.length === 0 && currentLinks.length === 0;
     const extras = (layout: unknown, strokes: unknown, frames: unknown, spacing: unknown) =>
         JSON.stringify([layout ?? 'free', strokes ?? [], frames ?? [], spacing ?? DEFAULT_SPACING]);
-    const routeDiffers = $linkRoute.get() !== (parsed.linkRoute ?? 'curve');
+    const routeDiffers = $linkRoute.get() !== (parsed.linkRoute ?? 'curve')
+        || $linkEnds.get() !== (parsed.linkEnds ?? 'sides');
     const differs = canonicalSnapshot(currentNodes, currentLinks, currentScene) !==
         canonicalSnapshot(parsed.nodes, parsed.links, incomingScene)
         || extras($layout.get(), $strokes.get(), $frames.get(), $spacing.get())

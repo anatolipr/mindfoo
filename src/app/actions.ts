@@ -10,13 +10,13 @@ import {
     groupSelection, ungroupSelection, frameSelection, renameFrame, setFrameColor, removeFrame, addEmoji,
     zoomIn, zoomOut, setTool, $tool, type Tool,
     $selectedStrokes, deleteSelectedStrokes, setStrokeWidth,
-    $linkRoute, setLinkRoute, setDefaultLinkRoute, resetBend, setLabelStyle,
+    $linkRoute, $linkEnds, setLinkRoute, setDefaultLinkRoute, setLinkEnds, resetBend, setLabelStyle,
 } from '../data/store';
 import { toggleTheme } from '../data/theme';
 import type { PaletteItem } from '../ui/command-palette';
 import { copySelection, cutSelection, pasteAt, duplicateSelection, copyAsOutline, copyAsMermaid } from '../data/clipboard';
 import { htmlToText } from '../data/textFormats';
-import type { LabelPos, LayoutMode, LinkRoute } from '../data/types';
+import type { LabelPos, LayoutMode, LinkEnds, LinkRoute } from '../data/types';
 import { copyAsPng, exportPng, exportSvg } from '../data/exportImage';
 import { NodeType, UNSELECTED, type NodeFontSize, type Width } from '../data/types';
 import type { Direction } from '../data/directions';
@@ -76,6 +76,7 @@ const LABEL_SIZES: [string, string][] = [['12px', 'Small'], ['15px', 'Normal'], 
 const LABEL_POSITIONS: [LabelPos, string][] = [['start', 'Near the start'], ['middle', 'Middle'], ['end', 'Near the end']];
 
 const ROUTES: [LinkRoute, string][] = [['curve', 'Curved'], ['straight', 'Straight'], ['elbow', 'Elbow (right angles)']];
+const ENDS: [LinkEnds, string][] = [['sides', 'Middle of facing sides'], ['edge', 'Nearest point on edge'], ['center', 'Toward node centers']];
 
 export const LAYOUTS: [LayoutMode, string][] = [
     ['free', 'Free'], ['mindmap', 'Mind map'], ['right', 'Tree, left to right'], ['down', 'Tree, top down'], ['radial', 'Radial'],
@@ -190,6 +191,8 @@ function canvasMenu(): MenuEntry[] {
         { id: 'snap', label: 'Snap to guides', checked: $snapEnabled.get() },
         { id: 'linkRouteMenu', label: 'Link route', items: ROUTES.map(([route, label]) =>
             ({ id: `defaultRoute:${route}`, label, checked: $linkRoute.get() === route })) },
+        { id: 'linkEndsMenu', label: 'Link ends', items: ENDS.map(([ends, label]) =>
+            ({ id: `linkEnds:${ends}`, label, checked: $linkEnds.get() === ends })) },
         { id: 'fit', label: 'Zoom to fit', disabled: empty },
         { id: 'zoomReset', label: 'Reset zoom', shortcut: sc('mod+0') },
         '-',
@@ -383,6 +386,7 @@ export function runAction(id: string): void {
         case 'strokeWidth': setStrokeWidth(Number(arg)); return;
         case 'route': setLinkRoute(arg === 'default' ? undefined : arg as LinkRoute); return;
         case 'defaultRoute': setDefaultLinkRoute(arg as LinkRoute); return;
+        case 'linkEnds': setLinkEnds(arg as LinkEnds); return;
         case 'resetBend': resetBend(); return;
         case 'labelSize': setLabelStyle({ textSize: arg === '15px' ? null : arg }); return;
         case 'labelPos': setLabelStyle({ labelPos: arg as LabelPos }); return;
