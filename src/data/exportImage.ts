@@ -1,6 +1,7 @@
 import { $nodes, $links, $lines, $selection, $zoom, $strokes, $frames, getViewRoot, hiddenIds } from './store';
 import { NodeType, LABEL_FRACTION } from './types';
 import { strokePath, frameBoxes } from './drawing';
+import { dashPattern } from './linkGeometry';
 import { determineArrow } from './directions';
 import { makeShape } from '../geo';
 import { getContrastColor } from 'avos/src/color-util';
@@ -79,9 +80,15 @@ function buildSvg(): Built | null {
         const stroke = link.color || fg;
         const start = determineArrow(true, line.reverse, link.direction);
         const end = determineArrow(false, line.reverse, link.direction);
-        parts.push(`<path id="p${i}" d="${esc(line.c)}" fill="none" stroke="${esc(stroke)}" stroke-width="${link.width || 2}"`
-            + (link.dash ? ` stroke-dasharray="${esc(link.dash)}"` : '')
+        const width = link.width || 2;
+        const pattern = dashPattern(link.dash, width, link.flow);
+        const dashAttrs = (pattern.array ? ` stroke-dasharray="${esc(pattern.array)}"` : '') + (pattern.round ? ' stroke-linecap="round"' : '');
+        parts.push(`<path id="p${i}" d="${esc(line.c)}" fill="none" stroke="${esc(stroke)}" stroke-width="${width}"` + dashAttrs
             + (start ? ' marker-start="url(#arrow)"' : '') + (end ? ' marker-end="url(#arrow)"' : '') + '/>');
+        if (line.sketch) {
+            parts.push(`<path d="${esc(line.sketch)}" fill="none" stroke="${esc(stroke)}" stroke-width="${width * 0.75}" stroke-opacity="0.6"`
+                + ' stroke-linecap="round"' + (pattern.array ? ` stroke-dasharray="${esc(pattern.array)}"` : '') + '/>');
+        }
         const labelSize = parseFloat(link.textSize ?? '') || parseFloat(bodyStyle.fontSize) || 16;
         const labelEl = link.labelBox ? root.querySelector(`#lbl${i}`) : null;
         if (link.text && labelEl) {

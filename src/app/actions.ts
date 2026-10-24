@@ -11,6 +11,7 @@ import {
     zoomIn, zoomOut, setTool, $tool, type Tool,
     $selectedStrokes, deleteSelectedStrokes, setStrokeWidth,
     $linkRoute, $linkEnds, setLinkRoute, setDefaultLinkRoute, setLinkEnds, resetBend, setLabelStyle,
+    toggleLinkFlow, addSibling, startTapLink,
 } from '../data/store';
 import { toggleTheme } from '../data/theme';
 import type { PaletteItem } from '../ui/command-palette';
@@ -18,7 +19,7 @@ import { copySelection, cutSelection, pasteAt, duplicateSelection, copyAsOutline
 import { htmlToText } from '../data/textFormats';
 import type { LabelPos, LayoutMode, LinkEnds, LinkRoute } from '../data/types';
 import { copyAsPng, exportPng, exportSvg } from '../data/exportImage';
-import { NodeType, UNSELECTED, type NodeFontSize, type Width } from '../data/types';
+import { NodeType, UNSELECTED, type Dash, type NodeFontSize, type Width } from '../data/types';
 import type { Direction } from '../data/directions';
 import type { MenuEntry } from '../ui/context-menu';
 import { sc } from '../ui/keys';
@@ -75,7 +76,11 @@ const SHAPES: [NodeType, string][] = [
 const LABEL_SIZES: [string, string][] = [['12px', 'Small'], ['15px', 'Normal'], ['20px', 'Large'], ['26px', 'Extra large']];
 const LABEL_POSITIONS: [LabelPos, string][] = [['start', 'Near the start'], ['middle', 'Middle'], ['end', 'Near the end']];
 
-const ROUTES: [LinkRoute, string][] = [['curve', 'Curved'], ['straight', 'Straight'], ['elbow', 'Elbow (right angles)']];
+const ROUTES: [LinkRoute, string][] = [
+    ['curve', 'Curved'], ['straight', 'Straight'], ['arc', 'Arc'], ['elbow', 'Elbow (right angles)'],
+    ['corner', 'Corner (one right angle)'], ['sketch', 'Hand-drawn'],
+];
+const DASH_STYLES: [Dash, string][] = [['', 'Solid'], ['4', 'Dashed'], ['dot', 'Dotted']];
 const ENDS: [LinkEnds, string][] = [['sides', 'Middle of facing sides'], ['edge', 'Nearest point on edge'], ['center', 'Toward node centers']];
 
 export const LAYOUTS: [LayoutMode, string][] = [
@@ -102,6 +107,7 @@ function nodeMenu(): MenuEntry[] {
     return [
         { id: 'edit', label: 'Edit text', shortcut: sc('enter'), disabled: multi },
         { id: 'addChild', label: 'Add child', shortcut: sc('tab'), disabled: multi },
+        { id: 'addSibling', label: 'Add sibling', disabled: multi },
         '-',
         { id: 'cut', label: 'Cut', shortcut: sc('mod+x') },
         { id: 'copy', label: 'Copy', shortcut: sc('mod+c') },
@@ -171,7 +177,12 @@ function lineMenu(): MenuEntry[] {
             { id: 'route:default', label: `Document default (${routeName($linkRoute.get())})`, checked: !link?.route },
         ] },
         { id: 'resetBend', label: 'Remove bend', disabled: !link?.bend },
-        { id: 'dash', label: 'Dashed', shortcut: '.', checked: !!link?.dash },
+        { id: 'dashMenu', label: 'Line style', items: [
+            ...DASH_STYLES.map(([dash, label]) => ({ id: `dashStyle:${dash}`, label, checked: (link?.dash ?? '') === dash,
+                shortcut: dash === '4' ? '.' : undefined })),
+            '-',
+            { id: 'flow', label: 'Animated flow', checked: !!link?.flow },
+        ] },
         { id: 'widthMenu', label: 'Thickness', items: WIDTHS.map(([width, label]) =>
             ({ id: `width:${width}`, label, checked: (link?.width ?? 2) === width })) },
         { id: 'color', label: 'Color…' },
@@ -221,6 +232,7 @@ export function fileMenu(): MenuEntry[] {
         { id: 'exportSvg', label: 'Export SVG' },
         '-',
         { id: 'present', label: 'Present', shortcut: 'F5' },
+        { id: 'theme', label: 'Dark / light theme' },
         { id: 'help', label: 'Keyboard shortcuts', shortcut: '?' },
         { id: 'about', label: 'About MindFoo' },
     ];
@@ -285,6 +297,14 @@ export function openStrokeMenu(e: MouseEvent): void {
         '-',
         { id: 'strokeDelete', label: chosen.length > 1 ? `Delete ${chosen.length} strokes` : 'Delete stroke', shortcut: sc('backspace') },
     ]);
+}
+
+// The selection's full menu, or one of its submenus by id (touch action bar).
+export function openSelectionMenu(anchor: HTMLElement, submenu?: string): void {
+    const items = $selectedLink.get() !== UNSELECTED ? lineMenu() : nodeMenu();
+    const entry = submenu ? items.find(item => item !== '-' && item.id === submenu) : undefined;
+    const r = anchor.getBoundingClientRect();
+    open(r.left, r.top, entry && entry !== '-' && entry.items ? entry.items : items);
 }
 
 export function closeContextMenu(): void {
@@ -438,6 +458,10 @@ export function runAction(id: string): void {
         case 'color': openColorPopover(menuAt.x, menuAt.y); return;
         case 'lineText': lineText(); return;
         case 'dir': setLinkDirection(arg as Direction); return;
+        case 'dashStyle': setLinkDash((arg ?? '') as Dash); return;
+        case 'flow': toggleLinkFlow(); return;
+        case 'addSibling': addSibling(); return;
+        case 'tapLink': startTapLink(); toast('Tap the node to link to', 'info'); return;
         case 'dash': {
             const link = $links.get()[$selectedLink.get()];
             setLinkDash(link?.dash ? '' : '4');

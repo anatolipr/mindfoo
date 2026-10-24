@@ -85,10 +85,18 @@ import {
     startEndDrag,
     startBendDrag,
     resetBend,
+    addNode,
+    addSibling,
+    deleteSelection,
+    lineDelete,
+    lineText,
+    startTapLink,
+    $linkFrom as linkFrom,
 } from './data/store';
 import { DEFAULT_SPACING } from './data/layout';
 import { strokePath, frameBoxes, FRAME_TITLE } from './data/drawing';
 import { NodeType, LABEL_FRACTION } from './data/types';
+import { dashPattern } from './data/linkGeometry';
 import './ui/presenter-overlay';
 import { onCopy, onCut, onPaste } from './data/clipboard';
 import { keydown, keyup } from './app/keyboard';
@@ -97,8 +105,10 @@ import {
     openNodeMenu, openLineMenu, openCanvasMenu, openFileMenu, openColorPopover, closeContextMenu, runAction,
     openLayoutMenu, openFrameMenu, LAYOUTS,
     $palette as palette, openPalette, closePalette, runPaletteCommand, $spacingPopover as spacingPopover, openStrokeMenu,
+    openSelectionMenu,
 } from './app/actions';
-import { pointerDown, pointerMove, pointerUp } from './app/touch';
+import { pointerDown, pointerMove, pointerUp, primeKeyboard } from './app/touch';
+import { $coarse, $compact } from './ui/viewport';
 import './ui/command-palette';
 
 import './color-picker';
@@ -124,6 +134,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
     ['Touch and pen', [
         ['One finger on canvas', 'Pan (a pen draws a selection box)'],
         ['Two fingers', 'Pinch to zoom, drag to pan'],
+        ['Tap a node or link', 'Its main actions appear at the bottom: edit, add child or sibling, link, style'],
         ['Double-tap / long-press', 'Same as double-click / right-click'],
         ['Pen button / eraser end', 'Right-click / erase ink'],
     ]],
@@ -158,7 +169,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
         ['Right-click', 'All options for a node, link or the canvas'],
         ['Space', 'Next shape, or next arrow style on a link'],
         [']', 'Next text size, or line thickness'],
-        ['.', 'Dashed line on/off'],
+        ['.', 'Line style: solid, dashed, dotted'],
         ['← / → on a link', 'Arrow at its start / end on or off'],
         ['Drag a selected link’s end', 'Reconnect it to another node'],
         ['Drag a selected link’s ◆', 'Bend it; double-click to straighten'],
@@ -442,11 +453,86 @@ export class MindFooApp extends LitElement {
             font: inherit;
             cursor: pointer;
         }
+        .toolbar .touch {
+            display: none;
+        }
+        /* phone width: toolbar at the bottom, within thumb reach, and only
+           the main buttons (the rest are in the File menu and palette) */
+        .toolbar.compact {
+            top: auto;
+            left: 50%;
+            bottom: calc(10px + env(safe-area-inset-bottom));
+            transform: translateX(-50%);
+            border-radius: 12px;
+        }
+        .toolbar.compact .wide {
+            display: none;
+        }
+        .toolbar.compact button {
+            min-width: 36px;
+            padding: 0 4px;
+        }
+        .action-bar {
+            position: fixed;
+            left: 50%;
+            bottom: calc(16px + env(safe-area-inset-bottom));
+            transform: translateX(-50%);
+            z-index: 101;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            max-width: calc(100vw - 20px);
+            box-sizing: border-box;
+            overflow-x: auto;
+            touch-action: pan-x;
+            padding: 4px;
+            border-radius: 12px;
+            background: var(--menu-bg);
+            color: var(--menu-fg);
+            box-shadow: 0 2px 14px #00000050;
+            user-select: none;
+            -webkit-user-select: none;
+            font: 15px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            scrollbar-width: none;
+        }
+        .action-bar.compact {
+            bottom: calc(66px + env(safe-area-inset-bottom));
+        }
+        .action-bar button {
+            flex: none;
+            height: 42px;
+            min-width: 44px;
+            padding: 0 12px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            white-space: nowrap;
+        }
+        .action-bar button:active {
+            background: var(--accent);
+            color: #ffffff;
+        }
+        .action-bar .hint {
+            padding: 0 10px;
+            white-space: nowrap;
+            opacity: 0.8;
+        }
         @media (pointer: coarse) {
             .toolbar {
                 max-width: calc(100vw - 20px);
+                box-sizing: border-box;
                 overflow-x: auto;
                 touch-action: pan-x;
+                scrollbar-width: none;
+            }
+            .toolbar .touch {
+                display: inline-flex;
+            }
+            .resize-handle {
+                right: -14px;
+                width: 26px;
             }
             .toolbar button {
                 flex: none;
@@ -896,6 +982,7 @@ export class MindFooApp extends LitElement {
         const selectionStartValue = selectionStart.get();
         const zoomValue = zoom.get();
         const linkDragValue = linkDrag.get();
+        const coarse = $coarse.get();
         const handleNode = selectionValue.length === 1 && !editingValue && linkDragValue === -1
             && !presenting.get() && tool.get() === 'select'
             ? nodeList[selectionValue[0]] : undefined;
@@ -908,10 +995,13 @@ export class MindFooApp extends LitElement {
         const dragTo = dragFrom ? toScene(mouseValue.x, mouseValue.y) : undefined;
 
         return html`
-            ${nodeList.length === 0 ? html`<div class="emptyScene">
+            ${nodeList.length === 0 ? (coarse ? html`<div class="emptyScene">
+                <span>Double-tap anywhere, or tap +, to add a node</span>
+                <small>Long-press for options · Pinch to zoom · Drag with one finger to pan</small>
+            </div>` : html`<div class="emptyScene">
                 <span>Double-click anywhere to add a node</span>
                 <small>Right-click for options · Paste a list or Mermaid to build a map · ? for shortcuts</small>
-            </div>` : nothing}
+            </div>`) : nothing}
 
             <div class="container" style="left:${sceneValue.x}px; top:${sceneValue.y}px; transform: scale(${zoomValue}); transform-origin: 0 0;">
                 <svg style="overflow:visible">
@@ -944,9 +1034,17 @@ export class MindFooApp extends LitElement {
                         const link = linkList[i];
                         if (line.hidden) return nothing;
                         const faded = link && (dim(link.one) || dim(link.two));
+                        const width = link?.width || 2;
+                        const pattern = dashPattern(link?.dash, width, link?.flow);
+                        // flows toward the arrow; toward link.two when there is none or two
+                        const backward = !!link && determineArrow(true, line.reverse, link.direction)
+                            && !determineArrow(false, line.reverse, link.direction);
+                        const flow = link?.flow && pattern.period ? svg`<animate attributeName="stroke-dashoffset"
+                            from="0" to=${backward ? pattern.period : -pattern.period} dur="${Math.max(0.2, pattern.period / 30)}s"
+                            repeatCount="indefinite" />` : nothing;
                         return svg`<g opacity=${faded ? 0.15 : 1}>
                             <path role="none" class="line-hit" d=${line.c} fill="none" stroke="transparent"
-                                stroke-width=${Math.max(link?.width || 2, 14 / zoomValue)}
+                                stroke-width=${Math.max(width, (coarse ? 30 : 14) / zoomValue)}
                                 @mousedown=${(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); lineClick(i); }}
                                 @contextmenu=${(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); openLineMenu(i, e); }}
                                 @dblclick=${(e: MouseEvent) => { e.stopPropagation(); lineClick(i, true); }}
@@ -955,12 +1053,17 @@ export class MindFooApp extends LitElement {
                                 class="${classMap({ line: true, lineSelected: i === selectedLinkValue })}"
                                 fill="none"
                                 stroke=${link?.color || 'var(--fg-2)'}
-                                stroke-width=${link?.width || 2}
-                                stroke-dasharray=${link?.dash}
+                                stroke-width=${width}
+                                stroke-dasharray=${pattern.array ?? nothing}
+                                stroke-linecap=${pattern.round ? 'round' : nothing}
                                 d=${line.c}
                                 marker-start=${determineArrow(true, line.reverse, link?.direction) ? 'url(#arrow)' : ''}
                                 marker-end=${determineArrow(false, line.reverse, link?.direction) ? 'url(#arrow)' : ''}
-                            />
+                            >${flow}</path>
+                            ${line.sketch ? svg`<path role="none" class="line" fill="none" d=${line.sketch}
+                                stroke=${link?.color || 'var(--fg-2)'} stroke-width=${width * 0.75} stroke-opacity="0.6"
+                                stroke-dasharray=${pattern.array ?? nothing} stroke-linecap="round"
+                            >${flow}</path>` : nothing}
                             ${link?.text && !link.labelBox ? svg`
                                 <text role="none" dy="-10"
                                     style="user-select:none; cursor: pointer;"
@@ -1072,6 +1175,7 @@ export class MindFooApp extends LitElement {
 
             ${this.renderLineEditor(zoomValue, sceneValue)}
             ${presentingValue ? this.renderPresenterBar() : this.renderToolbar(zoomValue, selectionValue.length > 0 || selectedLinkValue > -1 || toolValue === 'pen' || selectedStrokes.get().length > 0)}
+            ${!presentingValue && coarse ? this.renderActionBar(nodeList, selectionValue, selectedLinkValue, editingValue) : nothing}
             <mf-presenter-overlay .active=${presentingValue}></mf-presenter-overlay>
             ${this.renderColorPopover()}
             ${this.renderSpacingPopover()}
@@ -1096,41 +1200,42 @@ export class MindFooApp extends LitElement {
     private renderToolbar(zoomValue: number, hasSelection: boolean) {
         const state = $mcpConnectionState.get();
         return html`
-            <div role="toolbar" class="toolbar" data-ui
+            <div role="toolbar" class="toolbar ${$compact.get() ? 'compact' : ''}" data-ui
                 @mousedown=${(e: MouseEvent) => e.stopPropagation()}
                 @dblclick=${(e: MouseEvent) => e.stopPropagation()}
                 @contextmenu=${(e: MouseEvent) => e.stopPropagation()}>
                 <button title="File" @click=${(e: MouseEvent) => openFileMenu(e.currentTarget as HTMLElement)}>${icons.menu}</button>
-                <button title="Command palette (${sc('mod+k')}, or Shift twice)" @click=${openPalette}>${icons.search}</button>
+                <button class="wide" title="Command palette (${sc('mod+k')}, or Shift twice)" @click=${openPalette}>${icons.search}</button>
                 <span class="sep"></span>
                 <button title="Undo (${sc('mod+z')})" @click=${undo}>${icons.undo}</button>
                 <button title="Redo (${sc('mod+shift+z')})" @click=${redo}>${icons.redo}</button>
                 <span class="sep"></span>
-                <button title="Zoom out (${sc('mod+-')})" @click=${zoomOut}>${icons.zoomOut}</button>
-                <button class="zoom" title="Reset zoom (${sc('mod+0')})" @click=${zoomReset}>${Math.round(zoomValue * 100)}%</button>
-                <button title="Zoom in (${sc('mod+=')})" @click=${zoomIn}>${icons.zoomIn}</button>
+                <button class="wide" title="Zoom out (${sc('mod+-')})" @click=${zoomOut}>${icons.zoomOut}</button>
+                <button class="zoom wide" title="Reset zoom (${sc('mod+0')})" @click=${zoomReset}>${Math.round(zoomValue * 100)}%</button>
+                <button class="wide" title="Zoom in (${sc('mod+=')})" @click=${zoomIn}>${icons.zoomIn}</button>
                 <button title="Zoom to fit" @click=${zoomToFit}>${icons.fit}</button>
                 <span class="sep"></span>
                 <button title="Layout" @click=${(e: MouseEvent) => openLayoutMenu(e.currentTarget as HTMLElement)}>
-                    ${icons.layout}<span>${LAYOUTS.find(([id]) => id === layout.get())?.[1]} ▾</span>
+                    ${icons.layout}<span class="wide">${LAYOUTS.find(([id]) => id === layout.get())?.[1]} ▾</span>
                 </button>
                 <span class="sep"></span>
                 ${([['select', icons.pointer, 'Select and move (Esc)'], ['pen', icons.pen, 'Pen'],
                     ['highlighter', icons.highlighter, 'Highlighter'], ['eraser', icons.eraser, 'Eraser: drag over ink']] as [Tool, unknown, string][])
                     .map(([id, icon, title]) => html`
-                        <button class=${tool.get() === id ? 'active' : ''} title=${title} @click=${() => setTool(id)}>${icon}</button>
+                        <button class="${tool.get() === id ? 'active' : ''} ${id === 'highlighter' ? 'wide' : ''}" title=${title} @click=${() => setTool(id)}>${icon}</button>
                     `)}
                 <span class="sep"></span>
-                <button title="Color of the selection" ?disabled=${!hasSelection}
+                <button class="touch" title="Add a node (a child of the selected node)" @click=${this.addFromButton}>${icons.plus}</button>
+                <button class="wide" title="Color of the selection" ?disabled=${!hasSelection}
                     @click=${(e: MouseEvent) => {
                         const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
                         colorPopover.get() ? colorPopover.set(null) : openColorPopover(r.left, r.bottom + 6);
                     }}>${icons.color}</button>
-                <button title="${theme.get() === 'dark' ? 'Light' : 'Dark'} theme" @click=${toggleTheme}>${icons.theme}</button>
-                <button title="Present (F5)" ?disabled=${nodes.get().length === 0} @click=${startPresenting}>${icons.present}</button>
-                <button title="Keyboard shortcuts (?)" @click=${() => help.set(true)}>${icons.help}</button>
-                <span class="sep"></span>
-                <button @click=${handleConnectClick} title="MCP bridge connection (click to rename; type channel:app-name to join a shared channel)">
+                <button class="wide" title="${theme.get() === 'dark' ? 'Light' : 'Dark'} theme" @click=${toggleTheme}>${icons.theme}</button>
+                <button class="wide" title="Present (F5)" ?disabled=${nodes.get().length === 0} @click=${startPresenting}>${icons.present}</button>
+                <button class="wide" title="Keyboard shortcuts (?)" @click=${() => help.set(true)}>${icons.help}</button>
+                <span class="sep wide"></span>
+                <button class="wide" @click=${handleConnectClick} title="MCP bridge connection (click to rename; type channel:app-name to join a shared channel)">
                     <span>${state === 'connected' ? '🟢' : state === 'connecting' ? '🟡' : '⚪'}</span>
                     <span>${state === 'connected' ? (
                             $mcpAppLabel.get() && $mcpAppLabel.get() !== $mcpChannel.get()
@@ -1141,6 +1246,69 @@ export class MindFooApp extends LitElement {
                         : 'mcp'}</span>
                 </button>
             </div>
+        `;
+    }
+
+    // Toolbar +: a child of the selected node, else a node mid-screen.
+    private addFromButton = (): void => {
+        primeKeyboard();
+        if (selection.get().length) {
+            void add();
+            return;
+        }
+        const at = toScene(window.innerWidth / 2, window.innerHeight / 2);
+        void addNode(at.x, at.y);
+    };
+
+    // Touch: the common actions for the selection as big buttons, since
+    // there is no keyboard and no right button. While a node is edited:
+    // Done and next child / sibling, for typing a map in one go.
+    private renderActionBar(nodeList: Node[], selectionValue: number[], selectedLinkValue: number, editingValue: boolean) {
+        // no preventDefault on mousedown would move focus out of the node
+        // being edited (and end the edit) before the click lands
+        const stop = (e: Event) => { e.stopPropagation(); e.preventDefault(); };
+        // keyboard: the action opens a text field, so the keyboard should come up
+        const button = (label: string, title: string, run: (e: MouseEvent) => void, keyboard = false) => html`
+            <button title=${title} @click=${(e: MouseEvent) => { if (keyboard) primeKeyboard(); run(e); }}>${label}</button>`;
+        const anchor = (e: MouseEvent) => e.currentTarget as HTMLElement;
+        const colorAt = (e: MouseEvent) => {
+            const r = anchor(e).getBoundingClientRect();
+            openColorPopover(Math.max(4, r.left - 80), r.top - 210);
+        };
+        let content;
+        if (linkFrom.get() !== null) {
+            content = html`<span class="hint">Tap the node to link to</span>${button('Cancel', 'Cancel linking', () => linkFrom.set(null))}`;
+        } else if (editingValue && selectionValue.length === 1) {
+            content = html`
+                ${button('Done', 'Finish editing', () => finishEdit())}
+                ${button('+ Child', 'Finish and add a child', () => { finishEdit(); void add(); })}
+                ${button('+ Sibling', 'Finish and add a sibling', () => { finishEdit(); void addSibling(); })}`;
+        } else if (selectedLinkValue > -1) {
+            content = html`
+                ${button('Label', 'Edit the label', () => lineText(), true)}
+                ${button('Arrows', 'Arrows', e => openSelectionMenu(anchor(e), 'arrowsMenu'))}
+                ${button('Route', 'Route', e => openSelectionMenu(anchor(e), 'routeMenu'))}
+                ${button('Style', 'Line style', e => openSelectionMenu(anchor(e), 'dashMenu'))}
+                ${button('Color', 'Color', colorAt)}
+                ${button('Delete', 'Delete the link', () => lineDelete(selectedLinkValue))}
+                ${button('⋯', 'More', e => openSelectionMenu(anchor(e)))}`;
+        } else if (selectionValue.length > 0) {
+            const one = selectionValue.length === 1 ? nodeList[selectionValue[0]] : undefined;
+            content = html`
+                ${one ? button('Edit', 'Edit text', () => void toggleEdit(one.id), true) : nothing}
+                ${one ? button('+ Child', 'Add a child', () => void add(), true) : nothing}
+                ${one ? button('+ Sibling', 'Add a sibling', () => void addSibling(), true) : nothing}
+                ${one ? button('Link', 'Link to another node', () => startTapLink()) : nothing}
+                ${button('Shape', 'Shape', e => openSelectionMenu(anchor(e), 'shapeMenu'))}
+                ${button('Color', 'Color', colorAt)}
+                ${button('Delete', 'Delete', () => deleteSelection())}
+                ${button('⋯', 'More', e => openSelectionMenu(anchor(e)))}`;
+        } else {
+            return nothing;
+        }
+        return html`
+            <div role="toolbar" class="action-bar ${$compact.get() ? 'compact' : ''}" data-ui
+                @mousedown=${stop} @dblclick=${(e: Event) => e.stopPropagation()} @contextmenu=${stop}>${content}</div>
         `;
     }
 
@@ -1175,7 +1343,7 @@ export class MindFooApp extends LitElement {
                             presentingValue: boolean, toolValue: Tool) {
         const line = lineList[index];
         if (index < 0 || !line || line.hidden || presentingValue || toolValue !== 'select' || !line.start || !line.end) return nothing;
-        const r = 6 / zoomValue;
+        const r = ($coarse.get() ? 11 : 6) / zoomValue;
         const drag = endDrag.get();
         const grip = (p: { x: number; y: number }, end: 'one' | 'two') => svg`
             <circle class="link-grip" cx=${p.x} cy=${p.y} r=${r} stroke-width=${2 / zoomValue}

@@ -15,7 +15,8 @@ It is for the most part an attempt to make a more rapid mind mapping tool which 
 - cell links
 - link line color
 - link line width
-- dashed link lines
+- dashed, dotted and animated "flow" link lines
+- link routes: curved, straight, arc, elbow, corner, hand-drawn
 - cell alignment, distribution & mirror
 - infinite scene (scroll / wheel based)
 
@@ -35,7 +36,7 @@ more coming soon:
 
 https://mindfoo.netlify.app/
 
-Note: there is no support for mobile / touch screen devices, yet
+Works on phones and tablets: tap a node or link for its actions, double-tap to add, long-press for the full menu, pinch to zoom.
   
 
 ## keyboard shortcuts

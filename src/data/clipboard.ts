@@ -3,7 +3,7 @@ import {
     $nodes, $links, $selection, $selectedLink, $editing, $mouse, $layout, $spacing,
     snapshot, makeNodesMap, makeLines, tick, resize, toScene, deleteSelection, setLayout,
 } from './store';
-import { DEFAULT_DASH, DEFAULT_NODE_FONT_SIZE, DEFAULT_NODE_TYPE, DEFAULT_WIDTH, UNSELECTED, type LayoutMode, type Link, type Node } from './types';
+import { DASHES, DEFAULT_DASH, DEFAULT_NODE_FONT_SIZE, DEFAULT_NODE_TYPE, DEFAULT_WIDTH, LINK_ROUTES, UNSELECTED, type LayoutMode, type Link, type Node } from './types';
 import { computeLayout } from './layout';
 import { blankNode, parseMermaid, parseOutline, toMermaid, toOutline } from './textFormats';
 import { sanitizeHtml } from '../util';
@@ -64,15 +64,16 @@ function parseClip(json: string): Clip | null {
             .map((l: any) => ({
                 one: l.one, two: l.two,
                 direction: ['none', 'both', 'left', 'right'].includes(l.direction) ? l.direction : 'none',
-                dash: l.dash === '4' ? '4' : '',
+                dash: DASHES.includes(l.dash) ? l.dash : '',
                 width: [2, 4, 6].includes(l.width) ? l.width : DEFAULT_WIDTH,
                 ...(typeof l.color === 'string' ? { color: l.color } : {}),
                 ...(typeof l.text === 'string' ? { text: l.text } : {}),
-                ...(['curve', 'straight', 'elbow'].includes(l.route) ? { route: l.route } : {}),
+                ...(LINK_ROUTES.includes(l.route) ? { route: l.route } : {}),
                 ...(typeof l.bend === 'number' ? { bend: l.bend } : {}),
                 ...(typeof l.textSize === 'string' && /^\d+px$/.test(l.textSize) ? { textSize: l.textSize } : {}),
                 ...(['start', 'end'].includes(l.labelPos) ? { labelPos: l.labelPos } : {}),
                 ...(l.labelBox === true ? { labelBox: true } : {}),
+                ...(l.flow === true ? { flow: true } : {}),
             }));
         return nodes.length ? { nodes, links } : null;
     } catch (e) {

@@ -1,11 +1,11 @@
 import { nextElement } from "../../util";
-import type { Dash, Width } from "../types";
+import { DASHES, type Dash, type Width } from "../types";
 
 
 
 export const widths: Width[] = [2, 4, 6];
 
-export const dashes: Dash[] = ['', '4'];
+export const dashes: Dash[] = DASHES;
 
 export function nextWidth(current: Width | undefined): Width {
     return nextElement(widths, current)

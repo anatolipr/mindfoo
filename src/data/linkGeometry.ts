@@ -68,3 +68,45 @@ export function normalOf(a: Pt, b: Pt): Pt {
 export function bendFromPoint(p: Pt, base: Pt, normal: Pt): number {
     return (p.x - base.x) * normal.x + (p.y - base.y) * normal.y;
 }
+
+// The single corner of an L route: along the main axis first, then across.
+export function cornerPoint(a: Pt, b: Pt, vertical: boolean): Pt {
+    return vertical ? { x: a.x, y: b.y } : { x: b.x, y: a.y };
+}
+
+// Small deterministic PRNG (mulberry32) seeded from a string, so a sketched
+// line keeps its wobble across renders.
+export function seededRandom(seed: string): () => number {
+    let h = 1779033703;
+    for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    return () => {
+        h = (h + 0x6D2B79F5) | 0;
+        let t = Math.imul(h ^ (h >>> 15), 1 | h);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+// A cubic as drawn by hand: control points (and, with `ends`, the end
+// points) pushed off by up to `amount` scene px.
+export function jitterCubic(c: number[][], random: () => number, amount: number, ends = 0): number[][] {
+    const off = (k: number) => (random() * 2 - 1) * k;
+    return c.map((p, i) => {
+        const k = i === 0 || i === 3 ? ends : amount;
+        return [p[0] + off(k), p[1] + off(k)];
+    });
+}
+
+// stroke-dasharray for a link style: dots are round caps spaced by the line
+// width; a flowing solid line gets dashes so the motion shows. Also the
+// pattern's length, which is how far one animation cycle moves it.
+export function dashPattern(dash: string | undefined, width: number, flow?: boolean): { array?: string; period: number; round: boolean } {
+    if (dash === 'dot') return { array: `0.01 ${width * 2.5}`, period: 0.01 + width * 2.5, round: true };
+    if (dash) {
+        const parts = dash.split(/[ ,]+/).map(Number).filter(n => n > 0);
+        const sum = parts.reduce((a, b) => a + b, 0) * (parts.length % 2 ? 2 : 1);
+        return { array: dash, period: sum || 8, round: false };
+    }
+    if (flow) return { array: `${width * 4} ${width * 3}`, period: width * 7, round: false };
+    return { period: 0, round: false };
+}

@@ -41,15 +41,16 @@ export const LINK_FIELDS: Record<string, FieldSpec> = {
 	one: { type: 'nodeId', required: true },
 	two: { type: 'nodeId', required: true },
 	direction: { type: 'enum', values: ['none', 'both', 'left', 'right'], required: false },
-	dash: { type: 'enum', values: ['', '4'], required: false },
+	dash: { type: 'enum', values: ['', '4', 'dot'], required: false },
 	color: { type: 'string', required: false },
 	width: { type: 'number', required: false },
 	text: { type: 'string', required: false },
 	textSize: { type: 'string', required: false },
-	route: { type: 'enum', values: ['curve', 'straight', 'elbow'], required: false },
+	route: { type: 'enum', values: ['curve', 'straight', 'elbow', 'corner', 'arc', 'sketch'], required: false },
 	bend: { type: 'number', required: false },
 	labelPos: { type: 'enum', values: ['start', 'middle', 'end'], required: false },
 	labelBox: { type: 'boolean', required: false },
+	flow: { type: 'boolean', required: false },
 };
 
 function typeMatches(value: any, spec: FieldSpec): boolean {

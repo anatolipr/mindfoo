@@ -8,8 +8,8 @@ import { lineCurveFactor } from './consts';
 import intersect from "path-intersection"
 import { deCasteljau, makeCurve, makeShape } from '../geo';
 import { determineNextDirection, toggleArrows, type Direction } from './directions';
-import { NodeType, type NodeFontSize, type Dash, type Width, type LayoutMode, type Stroke, type Frame, type LinkRoute, type LinkEnds, LINK_ENDS } from './types';
-import { elbowPoints, roundedPolyline, cubicPoint, normalOf, bendFromPoint, polylinePoint, type Pt } from './linkGeometry';
+import { NodeType, type NodeFontSize, type Dash, type Width, type LayoutMode, type Stroke, type Frame, type LinkRoute, type LinkEnds, LINK_ENDS, LINK_ROUTES } from './types';
+import { elbowPoints, cornerPoint, roundedPolyline, cubicPoint, normalOf, bendFromPoint, polylinePoint, seededRandom, jitterCubic, type Pt } from './linkGeometry';
 import { LABEL_FRACTION, type LabelPos } from './types';
 import { buildTree, computeLayout, preorder, DEFAULT_SPACING, type Spacing } from './layout';
 import { snapMove, unionBox, type Box, type GuideLine } from './snap';
@@ -449,6 +449,18 @@ export async function add() {
     }
 }
 
+// Adds a node next to the selected one, under the same parent.
+export async function addSibling() {
+    const nodes0 = $nodes.get();
+    const node = nodes0[$selection.get()[0]];
+    if (!node) return add();
+    const parentLink = $links.get().find(link => link.two === node.id && link.one !== node.id);
+    const parentIndex = parentLink ? nodes0.findIndex(n => n.id === parentLink.one) : -1;
+    if (parentIndex === -1) return addNode(node.x, node.y + node.height / 2 + 60);
+    const at = childPosition(parentIndex);
+    await addNode(at.x, at.y, parentIndex);
+}
+
 // Children go to the right of the parent, stacked below existing children.
 function childPosition(parentIndex: number): Coordinates {
     const parent = $nodes.get()[parentIndex];
@@ -673,7 +685,22 @@ function routeLink(link: Link, a: Node, b: Node, i: number, spread: number, layo
     const vertical = layout === 'down' || (layout !== 'mindmap' && layout !== 'right' && Math.abs(dy) > Math.abs(dx));
     const bend = link.bend ?? 0;
 
-    if (route === 'elbow') {
+    if (route === 'corner') {
+        // one right angle; falls back to an elbow when the corner would sit
+        // inside a node (the nodes overlap along one axis)
+        const corner = cornerPoint(a, b, vertical);
+        const inside = (n: Node) => Math.abs(corner.x - n.x) <= n.width / 2 && Math.abs(corner.y - n.y) <= n.height / 2;
+        if (!inside(a) && !inside(b) && !spread) {
+            const start = clipToShape(a, corner);
+            const end = clipToShape(b, corner);
+            return {
+                id, c: roundedPolyline([start, corner, end], 12), reverse: false, start, end,
+                labelAt: polylinePoint([start, corner, end], labelFraction(link)),
+            };
+        }
+    }
+
+    if (route === 'elbow' || route === 'corner') {
         const pts = elbowPoints(a, b, vertical, bend + spread);
         const start = clipToShape(a, pts[1]);
         const end = clipToShape(b, pts[2]);
@@ -704,10 +731,13 @@ function routeLink(link: Link, a: Node, b: Node, i: number, spread: number, layo
 
     const n = normalOf(p, q);
     let c: number[][];
-    if (route === 'straight') {
+    if (route === 'straight' || route === 'arc' || route === 'sketch') {
+        // an arc bows out by a fifth of its length (to the left of one -> two,
+        // so links both ways between two nodes bow apart)
+        const bow = spread + (route === 'arc' ? Math.hypot(ex, ey) * 0.2 / 0.75 : 0);
         c = [[p.x, p.y], [p.x + ex / 3, p.y + ey / 3], [p.x + ex * 2 / 3, p.y + ey * 2 / 3], [q.x, q.y]];
-        c[1] = [c[1][0] + n.x * spread, c[1][1] + n.y * spread];
-        c[2] = [c[2][0] + n.x * spread, c[2][1] + n.y * spread];
+        c[1] = [c[1][0] + n.x * bow, c[1][1] + n.y * bow];
+        c[2] = [c[2][0] + n.x * bow, c[2][1] + n.y * bow];
     } else if (vertical) {
         c = [[p.x, p.y], [p.x + spread, p.y + ey * (1 - lineCurveFactor)], [q.x + spread, p.y + ey * lineCurveFactor], [q.x, q.y]];
     } else {
@@ -725,6 +755,20 @@ function routeLink(link: Link, a: Node, b: Node, i: number, spread: number, layo
         hits = intersect(makeCurve(back), makeShape(a));
         if (hits && hits[0]) back = deCasteljau(back, hits[0].t1);
         c = back.reverse();
+    }
+
+    if (route === 'sketch') {
+        // two loose passes, like a quick pen line; the label and arrows
+        // follow the first
+        const random = seededRandom(id);
+        const wobble = Math.min(6, 1.5 + Math.hypot(ex, ey) * 0.02);
+        const first = jitterCubic(c, random, wobble);
+        return {
+            id, c: makeCurve(first), reverse: false, sketch: makeCurve(jitterCubic(c, random, wobble, 1.5)),
+            start: { x: c[0][0], y: c[0][1] }, end: { x: c[3][0], y: c[3][1] },
+            handle: cubicPoint(first, 0.5), normal: n,
+            labelAt: cubicPoint(first, labelFraction(link)),
+        };
     }
 
     return {
@@ -894,7 +938,26 @@ export function wheel(e: WheelEvent) {
     })
 }
 
+// Node id waiting for a tap on the node to link it to (touch "Link" button).
+export const $linkFrom: Signal<NodeId | null> = new Signal<NodeId | null>(null);
+
+export function startTapLink(): void {
+    const node = $nodes.get()[$selection.get()[0]];
+    if (node) $linkFrom.set(node.id);
+}
+
 export function selectNode(i: number, e: MouseEvent) {
+    const from = $linkFrom.get();
+    if (from !== null) {
+        $linkFrom.set(null);
+        const node = $nodes.get()[i];
+        if (node && node.id !== from && !$links.get().some(l =>
+                (l.one === from && l.two === node.id) || (l.one === node.id && l.two === from))) {
+            snapshot();
+            addLink(from, node.id);
+            makeLines();
+        }
+    }
     if (!e.shiftKey) $selectedStrokes.set([]);
 
     pendingGestureSnapshot = true;
@@ -1653,7 +1716,7 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
     $layout.set(['free', 'mindmap', 'right', 'down', 'radial'].includes(parsed.layout as string) ? parsed.layout! : 'free');
     $spacing.set(parsed.spacing && typeof parsed.spacing.level === 'number' && typeof parsed.spacing.sibling === 'number'
         ? { level: parsed.spacing.level, sibling: parsed.spacing.sibling } : { ...DEFAULT_SPACING });
-    $linkRoute.set(['curve', 'straight', 'elbow'].includes(parsed.linkRoute as string) ? parsed.linkRoute! : 'curve');
+    $linkRoute.set(LINK_ROUTES.includes(parsed.linkRoute as LinkRoute) ? parsed.linkRoute! : 'curve');
     $linkEnds.set(LINK_ENDS.includes(parsed.linkEnds as LinkEnds) ? parsed.linkEnds! : 'sides');
     $strokes.set(Array.isArray(parsed.strokes) ? parsed.strokes.filter(validStroke) : []);
     $frames.set(Array.isArray(parsed.frames) ? parsed.frames.filter(validFrame) : []);
@@ -1713,6 +1776,7 @@ function normalizeLink(link: Link) {
         textSize: link.textSize ?? null,
         labelPos: link.labelPos ?? null,
         labelBox: link.labelBox ?? null,
+        flow: link.flow ?? null,
     };
 }
 
@@ -1930,6 +1994,13 @@ export function setLinkDash(dash: Dash): void {
     updateSelectedLink(link => link.dash = dash);
 }
 
+export function toggleLinkFlow(): void {
+    updateSelectedLink(link => {
+        if (link.flow) delete link.flow;
+        else link.flow = true;
+    });
+}
+
 export function setLinkWidth(width: Width): void {
     updateSelectedLink(link => link.width = width);
 }
@@ -1949,6 +2020,7 @@ export function lineDelete(i: number): void {
 
 
 export function bodyMouseDown(e: MouseEvent) {
+    $linkFrom.set(null);
     $moving.set(false);
     $editing.set(false);
     $selectedLink.set(UNSELECTED);

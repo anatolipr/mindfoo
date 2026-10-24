@@ -6,6 +6,7 @@ const icon = (body: ReturnType<typeof svg>) => svg`<svg width="16" height="16" v
 
 export const icons = {
     menu: icon(svg`<path d="M2.5 4h11M2.5 8h11M2.5 12h11"/>`),
+    plus: icon(svg`<path d="M8 3v10M3 8h10"/>`),
     undo: icon(svg`<path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a3.5 3.5 0 0 1 0 7H7"/>`),
     redo: icon(svg`<path d="M10.5 3.5l3 3-3 3"/><path d="M13.5 6.5h-7a3.5 3.5 0 0 0 0 7H9"/>`),
     zoomOut: icon(svg`<circle cx="7" cy="7" r="4.5"/><path d="M5 7h4M10.5 10.5 14 14"/>`),

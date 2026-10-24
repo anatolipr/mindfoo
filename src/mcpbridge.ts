@@ -127,8 +127,10 @@ const DESCRIPTION_SECTIONS: DescriptionSection[] = [
 			'"left"/"right" mean whichever node currently renders further left/right on screen, NOT "one" vs ' +
 			'"two", so the arrow can visually flip if a node\'s x later moves it past the other node - prefer ' +
 			'"both"/"none" if a stable "points at node X" meaning matters more than screen side, "dash": ""|' +
-			'"4" (solid/dashed), "width": 2|4|6 (stroke px), "color": CSS color or undefined for theme ' +
-			'default, "text": optional label following the curve. Nodes/links are flat top-level arrays, not ' +
+			'"4"|"dot" (solid/dashed/dotted), "width": 2|4|6 (stroke px), "color": CSS color or undefined for theme ' +
+			'default, "text": optional label following the curve, "route": optional "curve"|"straight"|"arc"|' +
+			'"elbow"|"corner"|"sketch" (unset = document default), "flow": optional true for dashes animated ' +
+			'toward the arrow (good for showing data or process flow). Nodes/links are flat top-level arrays, not ' +
 			'nested - connectivity is expressed purely by node x/y plus link one/two, there is no parent/ ' +
 			'child scene graph. ' +
 			'GOTCHAS: (1) links reference nodes by "id" (never array index, which is incidental) - a link ' +
@@ -384,6 +386,8 @@ function fillLinkDefaults(l: Partial<Link>): Link {
 		width: l.width ?? DEFAULT_WIDTH,
 		color: l.color,
 		text: l.text,
+		...(l.route ? { route: l.route } : {}),
+		...(l.flow ? { flow: true } : {}),
 	};
 }
 
@@ -677,8 +681,8 @@ function hexToRgba(hex: string): { r: number; g: number; b: number; a: number } 
 	},
 	{
 		name: 'rotate_link_dash',
-		description: `${MOCK_WORKFLOW_NOTE} Toggles the currently-selected link\'s "dash" between "" (solid) ` +
-			'and "4" (dashed) - same as pressing "." with a link selected in the UI. Call set_selected_link ' +
+		description: `${MOCK_WORKFLOW_NOTE} Cycles the currently-selected link\'s "dash" through "" (solid), ` +
+			'"4" (dashed) and "dot" (dotted) - same as pressing "." with a link selected in the UI. Call set_selected_link ' +
 			'first.',
 		params: {},
 		fn: rotateLinkDashTool,

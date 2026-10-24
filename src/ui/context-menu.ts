@@ -4,7 +4,8 @@ import { customElement, property, state } from 'lit/decorators.js';
 // Right-click menu, same look and item shape as htmlpaint's ContextMenu:
 // a list of {id, label, shortcut?, disabled?, checked?, items?} entries, or
 // '-' for a separator. An entry with `items` opens a submenu on hover/click.
-// Fires `pick` (detail: item id) and `close`.
+// Fires `pick` (detail: item id) and `close`. On a phone-width screen it is a
+// bottom sheet instead, and a submenu replaces the list (with a Back row).
 export type MenuItem = {
     id: string;
     label: string;
@@ -28,6 +29,12 @@ export class ContextMenu extends LitElement {
     @state() accessor top = 0;
     @state() accessor openSub = -1;
     @state() accessor subPos = { x: 0, y: 0, parentLeft: 0 };
+    // sheet mode: indexes of the submenus opened, outermost first
+    @state() accessor path: number[] = [];
+
+    private get sheet(): boolean {
+        return !this.nested && window.matchMedia('(max-width: 640px)').matches;
+    }
 
     static styles = css`
         .ctx {
@@ -83,6 +90,29 @@ export class ContextMenu extends LitElement {
             .ctx { font-size: 15px; }
             .item { padding: 10px 12px; }
         }
+        .ctx.sheet {
+            left: 8px !important;
+            right: 8px;
+            top: auto !important;
+            bottom: calc(8px + env(safe-area-inset-bottom));
+            max-height: 65vh;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            touch-action: pan-y;
+            font-size: 16px;
+            border-radius: 12px;
+            box-shadow: 0 -4px 30px #00000055;
+            animation: sheet-in 140ms ease-out;
+        }
+        .sheet .item {
+            padding: 12px 14px;
+        }
+        .sheet .back {
+            font-weight: 600;
+        }
+        @keyframes sheet-in {
+            from { transform: translateY(20px); opacity: 0; }
+        }
     `;
 
     connectedCallback(): void {
@@ -124,13 +154,28 @@ export class ContextMenu extends LitElement {
             this.left = this.x;
             this.top = this.y;
         }
-        if (changed.has('items')) this.openSub = -1;
+        if (changed.has('items')) {
+            this.openSub = -1;
+            this.path = [];
+        }
+    }
+
+    // the entries shown in sheet mode: the innermost open submenu's
+    private sheetItems(): MenuEntry[] {
+        let items = this.items;
+        for (const i of this.path) {
+            const item = items[i];
+            if (item === '-' || !item?.items) break;
+            items = item.items;
+        }
+        return items;
     }
 
     // Keep the menu inside the viewport: flip left/up near the edges. A
     // submenu flips to the parent's left side.
     updated(changed: Map<string, unknown>): void {
         if (!changed.has('x') && !changed.has('y') && !changed.has('items')) return;
+        if (this.sheet) return;
         const el = this.renderRoot.querySelector('.ctx') as HTMLElement | null;
         if (!el) return;
         const r = el.getBoundingClientRect();
@@ -153,6 +198,10 @@ export class ContextMenu extends LitElement {
 
     private pick(item: MenuItem, i: number, e: MouseEvent): void {
         if (item.disabled) return;
+        if (item.items && this.sheet) {
+            this.path = [...this.path, i];
+            return;
+        }
         if (item.items) {
             this.showSub(i, e.currentTarget as HTMLElement);
             return;
@@ -161,19 +210,34 @@ export class ContextMenu extends LitElement {
     }
 
     private hover(item: MenuItem, i: number, e: MouseEvent): void {
+        if (this.sheet) return;
         if (item.items && !item.disabled) this.showSub(i, e.currentTarget as HTMLElement);
         else this.openSub = -1;
     }
 
     render() {
-        const hasChecks = this.items.some(item => item !== '-' && item.checked !== undefined);
+        const sheet = this.sheet;
+        const items = sheet ? this.sheetItems() : this.items;
+        const hasChecks = items.some(item => item !== '-' && item.checked !== undefined);
         const sub = this.openSub !== -1 ? this.items[this.openSub] : undefined;
+        let parent: MenuEntry | undefined;
+        if (sheet && this.path.length) {
+            let level = this.items;
+            for (const i of this.path.slice(0, -1)) level = (level[i] as MenuItem).items!;
+            parent = level[this.path[this.path.length - 1]];
+        }
         return html`
-            <div class="ctx" role="menu" style="left:${this.left}px; top:${this.top}px;"
+            <div class="ctx ${sheet ? 'sheet' : ''}" role="menu" style="left:${this.left}px; top:${this.top}px;"
                 @mousedown=${(e: MouseEvent) => e.stopPropagation()}
                 @dblclick=${(e: MouseEvent) => e.stopPropagation()}
                 @contextmenu=${(e: MouseEvent) => { e.preventDefault(); e.stopPropagation(); }}>
-                ${this.items.map((item, i) => item === '-' ? html`<div class="sep"></div>` : html`
+                ${parent && parent !== '-' ? html`
+                    <div class="item back" role="menuitem" @click=${() => this.path = this.path.slice(0, -1)}>
+                        <span>‹ ${parent.label}</span>
+                    </div>
+                    <div class="sep"></div>
+                ` : nothing}
+                ${items.map((item, i) => item === '-' ? html`<div class="sep"></div>` : html`
                     <div class="item ${item.disabled ? 'disabled' : ''} ${this.openSub === i ? 'open' : ''}"
                         role="menuitem" aria-disabled=${item.disabled ? 'true' : 'false'}
                         @mouseenter=${(e: MouseEvent) => this.hover(item, i, e)}
@@ -182,7 +246,7 @@ export class ContextMenu extends LitElement {
                         <span class="sc">${item.shortcut ?? ''}${item.items ? html`<span class="arrow">▸</span>` : nothing}</span>
                     </div>
                 `)}
-                ${sub && sub !== '-' && sub.items ? html`
+                ${!sheet && sub && sub !== '-' && sub.items ? html`
                     <mf-context-menu nested .items=${sub.items}
                         .x=${this.subPos.x} .y=${this.subPos.y} .parentLeft=${this.subPos.parentLeft}
                         @pick=${(e: CustomEvent) => this.dispatchEvent(new CustomEvent('pick', { detail: e.detail }))}

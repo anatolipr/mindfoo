@@ -67,7 +67,9 @@ export type OptionalSelectedIndex = number | unselected;
 
 export type Width = 2 | 4 | 6;
 export const DEFAULT_WIDTH: Width = 2;
-export type Dash = '' | '4' 
+// '' solid, '4' dashed, 'dot' dotted (round dots spaced by the line width)
+export type Dash = '' | '4' | 'dot';
+export const DASHES: Dash[] = ['', '4', 'dot'];
 export const DEFAULT_DASH: Dash = '';
 
 /**
@@ -100,13 +102,18 @@ export type Link = {
     // label placement along the link (start = link.one end), and whether it
     // sits in a box on the line instead of running along it
     labelPos?: LabelPos,
-    labelBox?: boolean
+    labelBox?: boolean,
+    // dashes march along the line toward its arrow (one -> two if none)
+    flow?: boolean
 }
 
 export type LabelPos = 'start' | 'middle' | 'end';
 export const LABEL_FRACTION: Record<LabelPos, number> = { start: 0.2, middle: 0.5, end: 0.8 };
 
-export type LinkRoute = 'curve' | 'straight' | 'elbow';
+// curve: S-curve; straight; elbow: two right angles; corner: one right
+// angle (L); arc: bows to one side; sketch: hand-drawn, slightly wobbly
+export type LinkRoute = 'curve' | 'straight' | 'elbow' | 'corner' | 'arc' | 'sketch';
+export const LINK_ROUTES: LinkRoute[] = ['curve', 'straight', 'elbow', 'corner', 'arc', 'sketch'];
 
 // Where curved and straight links meet their nodes: the middle of the facing
 // sides, the nearest point of the outline, or aimed at the center and cut
@@ -137,7 +144,9 @@ export type Line = {
     handle?: Coordinates,
     normal?: Coordinates,
     // where the label goes (labelPos along the path)
-    labelAt?: Coordinates
+    labelAt?: Coordinates,
+    // second, rougher pass of a hand-drawn ('sketch') line, drawn without arrows
+    sketch?: string
 }
 
 export type Coordinates = {

@@ -163,8 +163,27 @@ export function pointerUp(e: PointerEvent): void {
     const now = performance.now();
     if (lastTap && now - lastTap.t < DOUBLE_TAP_MS && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 25) {
         lastTap = null;
+        if (g.type === 'touch') primeKeyboard();
         fire('dblclick', g.target, e, { buttons: 0, detail: 2 });
     } else {
         lastTap = { t: now, x: e.clientX, y: e.clientY };
     }
+}
+
+// iOS only opens the on-screen keyboard for a focus() made during the touch
+// itself, and node editing focuses its field a moment later. Focusing a
+// hidden input now keeps the keyboard up when focus moves on to that field.
+let primer: HTMLInputElement | null = null;
+
+export function primeKeyboard(): void {
+    if (!primer) {
+        primer = document.createElement('input');
+        primer.setAttribute('aria-hidden', 'true');
+        primer.tabIndex = -1;
+        Object.assign(primer.style, { position: 'fixed', left: '0', top: '0', width: '1px', height: '1px', opacity: '0', fontSize: '16px', border: '0', padding: '0' });
+        document.body.append(primer);
+    }
+    primer.focus({ preventScroll: true });
+    // nothing took over (a double-tap that did not start editing): let go
+    window.setTimeout(() => { if (document.activeElement === primer) primer?.blur(); }, 600);
 }
