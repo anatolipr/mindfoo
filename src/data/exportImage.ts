@@ -210,3 +210,7 @@ export function exportSvg(name = 'diagram'): void {
     if (!built) return toast('Nothing to export', 'info');
     download(new Blob([built.svg], { type: 'image/svg+xml' }), `${name}.svg`);
 }
+
+export function saveMarkdown(markdown: string, name: string): void {
+    download(new Blob([markdown], { type: 'text/markdown' }), `${name.replace(/[\\/:*?"<>|]+/g, '-')}.md`);
+}

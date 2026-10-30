@@ -37,12 +37,56 @@ if (publicToken) {
     window.history.replaceState(null, '', publicTokenUrl.toString());
 }
 
+// `?node=` is a deep link to one node. `?map=` opens a public directory listing
+// and `?explore` the directory itself. Unlike a public token these stay in the
+// URL: they are not secrets, and the address should keep working when copied.
+const pageParams = new URLSearchParams(window.location.search);
+export const initialNode = pageParams.get('node');
+export const initialMap = pageParams.get('map');
+export const initialExplore = pageParams.has('explore');
+
 interface AuthGuard {
     redeemShareTokenFromUrl(): void;
     checkShareLinkJoins(): void;
     getPublicLink(token: string): Promise<PublicLinkView>;
     getPublicFolderFile(token: string, relPath: string): Promise<Response>;
+    listFiles(query?: string, folderPath?: string, recursive?: boolean, owner?: string): Promise<SavedFileRow[] | { files: SavedFileRow[] }>;
+    publishToDirectory(listing: PublishRequest): Promise<{ id: string; version: number; status: string }>;
+    listMyPublished(): Promise<{ items: DirectoryListing[] }>;
+    unpublish(id: string): Promise<unknown>;
+    searchDirectory(query: DirectoryQuery): Promise<DirectoryPage>;
+    getDirectoryListing(id: string): Promise<DirectoryListing & { content: string; markdown: string | null }>;
+    countDirectoryClone(id: string): Promise<unknown>;
+    reportDirectoryListing(id: string, reason: string): Promise<unknown>;
+    directoryMarkdownUrl(id: string): string;
 }
+
+export type SavedFileRow = { name: string; folderPath?: string };
+
+export interface DirectoryListing {
+    id: string;
+    owner: string;
+    title: string;
+    description: string;
+    tags: string[];
+    license: string;
+    forkedFrom: string | null;
+    forkedFromListing?: { id: string; title: string; owner: string } | null;
+    version: number;
+    stats: { nodes?: number; links?: number };
+    clones: number;
+    views: number;
+    status: 'listed' | 'pending' | 'hidden';
+    hasMarkdown: boolean;
+    updatedAt: string;
+}
+
+export type DirectoryQuery = { q?: string; tag?: string; sort?: 'popular' | 'new'; offset?: number; limit?: number };
+export type DirectoryPage = { total: number; items: DirectoryListing[]; tags: { tag: string; count: number }[] };
+export type PublishRequest = {
+    name: string; title: string; description?: string; tags?: string[]; license?: string;
+    forkedFrom?: string; markdown?: string;
+};
 
 export interface PublicLinkView {
     owner: string;
@@ -64,6 +108,10 @@ const authGuardPromise: Promise<AuthGuard> = Promise.all([
     }
     return authGuard as AuthGuard;
 });
+
+export function authGuard(): Promise<AuthGuard> {
+    return authGuardPromise;
+}
 
 // Resolves a public link: a file link's document (the same JSON string
 // importFromServer returns), or a folder link's listing.

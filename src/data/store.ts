@@ -20,7 +20,9 @@ import { nextNodeSize, nextNodeType } from './properties/nodePropertiesHelper';
 import { toast } from '../ui/toast';
 import { askConfirm, askText } from '../ui/dialog';
 import { isMac } from '../ui/keys';
-import { exportToServer, importFromServer, $serverName } from './remote';
+import { exportToServer, importFromServer, $serverName, initialMap, initialNode, publicToken } from './remote';
+import { documentSearchText, findNodes, type FindHit } from './find';
+import { parseRef, type NodeRef } from './refs';
 
 export const $nodes: Signal<Node[]> = new Signal(<Node[]>[], localStorage.getItem('debugNodes') ? 'nodes' : undefined);
 export const $links: Signal<Link[]> = new Signal(<Link[]>[], localStorage.getItem('debugLinks') ? 'links' : undefined);
@@ -40,7 +42,8 @@ export const $selectedLink: Signal<OptionalSelectedIndex> = new Signal(UNSELECTE
 
 export const $nodeMap: Signal<{[key: NodeId]: Node}> = new Signal({});
 
-export const MIN_ZOOM = 0.1;
+// Low enough to see a map of many thousands of nodes at once.
+export const MIN_ZOOM = 0.02;
 export const MAX_ZOOM = 4;
 // View state, like $scene: scene coords * zoom + $scene offset = screen px.
 export const $zoom: Signal<number> = new Signal(1);
@@ -211,11 +214,12 @@ export function documentJson(): string {
         nodes: $nodes.get(), links: $links.get(), scene: $scene.get(), zoom: $zoom.get(),
         layout: $layout.get(), strokes: $strokes.get(), frames: $frames.get(), spacing: $spacing.get(),
         linkRoute: $linkRoute.get(), linkEnds: $linkEnds.get(),
+        ...($origin.get() ? { origin: $origin.get() } : {}),
     });
 }
 
 function writeAutosave(): void {
-    if ($serverName.get()) return;
+    if ($serverName.get() || $preview.get()) return;
     try {
         const nodes = $nodes.get();
         const links = $links.get();
@@ -230,7 +234,7 @@ function writeAutosave(): void {
 }
 
 export function scheduleAutosave(): void {
-    if ($serverName.get()) return;
+    if ($serverName.get() || $preview.get()) return;
     window.clearTimeout(autosaveTimer);
     autosaveTimer = window.setTimeout(writeAutosave, 400);
 }
@@ -298,10 +302,13 @@ export function init() {
     makeLines();
 
     const hash = $serverName.get();
+    if (initialNode) pendingFocus = initialNode;
     if (hash) {
         loadFromServer(hash);
     } else {
         restoreAutosave();
+        // a shared document is still on its way; it applies the focus itself
+        if (!initialMap && !publicToken) applyPendingFocus();
     }
 
     const disposeAutosave = [$nodes, $links, $scene, $zoom, $layout, $strokes, $frames, $spacing, $linkRoute, $linkEnds]
@@ -345,6 +352,9 @@ export async function newFile(): Promise<void> {
     $presenting.set(false);
     $selection.set([]);
     $selectedLink.set(UNSELECTED as OptionalSelectedIndex);
+    $preview.set(null);
+    $origin.set(null);
+    $trail.set([]);
     makeNodesMap([]);
     resetUndoHistory();
     clearAutosave();
@@ -536,6 +546,37 @@ export function resize(i: number, doLines: boolean = false) {
     if (doLines) {
         makeLines()
     }
+}
+
+// Size changes from the view's ResizeObservers, measured and applied once a
+// frame. Scrolling a big map brings hundreds of nodes into the DOM at once, and
+// recomputing every link for each of them would freeze the page.
+const pendingMeasure = new Set<NodeId>();
+let measureScheduled = false;
+
+export function measureNode(id: NodeId): void {
+    pendingMeasure.add(id);
+    if (measureScheduled) return;
+    measureScheduled = true;
+    requestAnimationFrame(() => {
+        measureScheduled = false;
+        const map = $nodeMap.get();
+        const zoom = $zoom.get();
+        let changed = false;
+        pendingMeasure.forEach(nodeId => {
+            const node = map[nodeId];
+            const rect = node && getById(`d${node.id}`)?.getBoundingClientRect();
+            if (!rect) return;
+            const width = rect.width / zoom, height = rect.height / zoom;
+            if (Math.abs(node.width - width) > 0.25 || Math.abs(node.height - height) > 0.25) {
+                node.width = width;
+                node.height = height;
+                changed = true;
+            }
+        });
+        pendingMeasure.clear();
+        if (changed) makeLines();
+    });
 }
 
 // Nodes hidden inside collapsed branches: everything reachable through a
@@ -898,13 +939,8 @@ export function zoomReset(): void {
     zoomAround(window.innerWidth / 2, window.innerHeight / 2, 1);
 }
 
-export function zoomToFit(): void {
-    const nodes0 = $nodes.get();
-    if (nodes0.length === 0) {
-        $zoom.set(1);
-        $scene.set({ x: 0, y: 0 });
-        return;
-    }
+// The zoom and scene offset that show these nodes centered, never above 100%.
+function fitView(nodes0: Node[]): { zoom: number; scene: Coordinates } {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of nodes0) {
         minX = Math.min(minX, n.x - n.width / 2);
@@ -917,12 +953,310 @@ export function zoomToFit(): void {
     const zoom = clampZoom(Math.min(1,
         (w - 2 * margin) / Math.max(1, maxX - minX),
         (h - 2 * margin) / Math.max(1, maxY - minY)));
+    return { zoom, scene: { x: w / 2 - ((minX + maxX) / 2) * zoom, y: h / 2 - ((minY + maxY) / 2) * zoom } };
+}
+
+export function zoomToFit(): void {
+    const nodes0 = $nodes.get();
+    if (nodes0.length === 0) {
+        $zoom.set(1);
+        $scene.set({ x: 0, y: 0 });
+        return;
+    }
+    const { zoom, scene } = fitView(nodes0);
     $zoom.set(zoom);
-    $scene.set({
-        x: w / 2 - ((minX + maxX) / 2) * zoom,
-        y: h / 2 - ((minY + maxY) / 2) * zoom,
+    $scene.set(scene);
+}
+
+// --- moving the view to a node: search, references, deep links ---
+
+let flight = 0;
+
+// Glides the view rather than jumping, so the viewer keeps their bearings in a
+// big map. Interpolates the zoom geometrically, which looks even across scales.
+function flyTo(scene: Coordinates, zoom: number): void {
+    const id = ++flight;
+    const from = { scene: $scene.get(), zoom: $zoom.get() };
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        $zoom.set(zoom);
+        $scene.set(scene);
+        return;
+    }
+    const start = performance.now();
+    const step = (now: number) => {
+        if (id !== flight) return;
+        const t = Math.min(1, (now - start) / 320);
+        const k = 1 - (1 - t) * (1 - t) * (1 - t);
+        $zoom.set(from.zoom * Math.pow(zoom / from.zoom, k));
+        $scene.set({ x: from.scene.x + (scene.x - from.scene.x) * k, y: from.scene.y + (scene.y - from.scene.y) * k });
+        if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+}
+
+// Opens every collapsed branch hiding this node.
+function revealNode(id: NodeId): void {
+    if (!collapsedHiddenIds().has(id)) return;
+    const parents = new Map<NodeId, NodeId[]>();
+    for (const link of $links.get()) {
+        if (!parents.has(link.two)) parents.set(link.two, []);
+        parents.get(link.two)!.push(link.one);
+    }
+    const seen = new Set<NodeId>([id]);
+    const queue = [id];
+    for (let at = 0; at < queue.length; at++) {
+        for (const parent of parents.get(queue[at]) ?? []) {
+            if (seen.has(parent)) continue;
+            seen.add(parent);
+            queue.push(parent);
+        }
+    }
+    $nodes.update(list => {
+        for (const node of list) if (node.collapsed && seen.has(node.id)) node.collapsed = false;
+        return list;
+    });
+    makeLines();
+}
+
+// Centers a node at a readable size, opening any branch that hides it, and
+// selects it. Returns false when the document has no such node.
+export function focusNode(id: NodeId): boolean {
+    const nodes0 = $nodes.get();
+    const index = nodes0.findIndex(n => String(n.id) === String(id));
+    if (index === -1) return false;
+    const node = nodes0[index];
+    revealNode(node.id);
+    $selection.set([index]);
+    $selectedLink.set(UNSELECTED);
+    const zoom = $zoom.get() < 0.7 ? 1 : $zoom.get();
+    flyTo({ x: window.innerWidth / 2 - node.x * zoom, y: window.innerHeight / 2 - node.y * zoom }, zoom);
+    return true;
+}
+
+// Brings a whole set of nodes into view: "show me all the matches".
+export function fitNodes(ids: Iterable<NodeId>): void {
+    const wanted = new Set(ids);
+    if (!wanted.size) return;
+    wanted.forEach(revealNode);
+    const { zoom, scene } = fitView($nodes.get().filter(n => wanted.has(n.id)));
+    flyTo(scene, zoom);
+}
+
+// --- find ---
+
+export const $findOpen: Signal<boolean> = new Signal(false);
+export const $findQuery: Signal<string> = new Signal('');
+export const $findHits: Signal<FindHit[]> = new Signal(<FindHit[]>[]);
+export const $findIndex: Signal<number> = new Signal(-1);
+// Matches, while a search is showing: everything else is dimmed. Null otherwise.
+export const $findSet: Signal<Set<NodeId> | null> = new Signal<Set<NodeId> | null>(null);
+
+function runFind(query: string): void {
+    const hits = findNodes($nodes.get(), $links.get(), query);
+    $findHits.set(hits);
+    $findSet.set(query.trim() ? new Set(hits.map(h => h.id)) : null);
+    $findIndex.set(-1);
+}
+
+export function setFindQuery(query: string): void {
+    $findQuery.set(query);
+    runFind(query);
+}
+
+export function openFind(): void {
+    $findOpen.set(true);
+    runFind($findQuery.get());
+}
+
+export function closeFind(): void {
+    $findOpen.set(false);
+    $findSet.set(null);
+    $findIndex.set(-1);
+}
+
+// Moves to the next or previous match, wrapping around.
+export function stepFind(delta: number): void {
+    const hits = $findHits.get();
+    if (!hits.length) return;
+    const at = $findIndex.get();
+    const next = at === -1 ? (delta > 0 ? 0 : hits.length - 1) : (at + delta + hits.length) % hits.length;
+    goToHit(next);
+}
+
+export function goToHit(index: number): void {
+    const hit = $findHits.get()[index];
+    if (!hit) return;
+    $findIndex.set(index);
+    focusNode(hit.id);
+}
+
+// "Root › Branch › Parent" for a node, shown under each search result.
+export function nodePath(id: NodeId): string[] {
+    const links = $links.get();
+    const parent = new Map<NodeId, NodeId>();
+    for (const link of links) if (link.one !== link.two && !parent.has(link.two)) parent.set(link.two, link.one);
+    const map = $nodeMap.get();
+    const path: string[] = [];
+    const seen = new Set<NodeId>([id]);
+    for (let p = parent.get(id); p !== undefined && !seen.has(p) && path.length < 12; p = parent.get(p)) {
+        seen.add(p);
+        path.unshift(map[p]?.text ?? '');
+    }
+    return path;
+}
+
+// --- references and the way back ---
+
+export type DocOrigin = { listing: string; title: string; owner: string };
+// What is open when it is someone else's document, not yet the visitor's.
+export type DocPreview = { title: string; owner: string; listing?: string; license?: string; hasMarkdown?: boolean };
+export type TrailStep = { label: string; doc?: string; node?: NodeId; listing?: string };
+
+export const $origin: Signal<DocOrigin | null> = new Signal<DocOrigin | null>(null);
+export const $preview: Signal<DocPreview | null> = new Signal<DocPreview | null>(null);
+export const $trail: Signal<TrailStep[]> = new Signal(<TrailStep[]>[]);
+// Set by the directory module, which depends on this one.
+export const openListingHook: { open: ((id: string) => Promise<boolean>) | null } = { open: null };
+
+let pendingFocus: NodeId | null = null;
+let pendingFind: string | null = null;
+
+function applyPendingFocus(): void {
+    const id = pendingFocus;
+    pendingFocus = null;
+    if (id !== null && !focusNode(id)) toast('That node is no longer in this map', 'error');
+    // a deep link is used once: a reload should not jump back after navigating on
+    dropUrlParams('node');
+}
+
+function dropUrlParams(...names: string[]): void {
+    const url = new URL(window.location.href);
+    if (!names.some(name => url.searchParams.has(name))) return;
+    names.forEach(name => url.searchParams.delete(name));
+    history.replaceState(null, '', url.toString());
+}
+
+function applyPendingFind(): void {
+    const query = pendingFind;
+    pendingFind = null;
+    if (query === null) return;
+    setFindQuery(query);
+    $findOpen.set(true);
+    stepFind(1);
+}
+
+function currentStep(): TrailStep {
+    const selected = $nodes.get()[$selection.get()[0]];
+    const preview = $preview.get();
+    return {
+        label: preview?.title ?? $serverName.get() ?? 'this map',
+        doc: $serverName.get(),
+        listing: preview?.listing,
+        ...(selected ? { node: selected.id } : {}),
+    };
+}
+
+// Goes where a node points.
+export async function followRef(ref: NodeRef): Promise<void> {
+    if (ref.kind === 'url') {
+        window.open(ref.url, '_blank', 'noopener,noreferrer');
+        return;
+    }
+    const here = currentStep();
+    if (ref.kind === 'node') {
+        if (focusNode(ref.node)) $trail.set([...$trail.get(), here]);
+        else toast('That node is no longer in this map', 'error');
+        return;
+    }
+    if (ref.kind === 'doc') {
+        // an unsaved map has no address to come back to, but the step still
+        // goes on the trail: Back then reports that rather than doing nothing
+        $trail.set([...$trail.get(), here]);
+        if (ref.doc === $serverName.get()) {
+            if (ref.node !== undefined) focusNode(ref.node);
+            return;
+        }
+        pendingFocus = ref.node ?? null;
+        window.location.hash = ref.doc;
+        return;
+    }
+    pendingFocus = ref.node ?? null;
+    if (await openListingHook.open?.(ref.map)) $trail.set([...$trail.get(), here]);
+    else pendingFocus = null;
+}
+
+export async function followNodeRef(node: Node): Promise<void> {
+    const ref = parseRef(node.ref);
+    if (!ref) {
+        toast('This link is not valid: use a web address, #node, doc:name or map:id', 'error');
+        return;
+    }
+    await followRef(ref);
+}
+
+export async function goBack(): Promise<void> {
+    const trail = $trail.get();
+    const step = trail[trail.length - 1];
+    if (!step) return;
+    $trail.set(trail.slice(0, -1));
+    if (step.listing && step.listing !== $preview.get()?.listing) {
+        pendingFocus = step.node ?? null;
+        await openListingHook.open?.(step.listing);
+    } else if (step.doc && step.doc !== $serverName.get()) {
+        pendingFocus = step.node ?? null;
+        window.location.hash = step.doc;
+    } else if (!step.doc && !step.listing && $serverName.get()) {
+        toast('The map you came from was never saved', 'error');
+    } else if (step.node !== undefined) {
+        focusNode(step.node);
+    }
+}
+
+// Opens a saved document found by a search across documents, then shows the
+// first match inside it.
+export function openDocAndFind(name: string, query: string): void {
+    pendingFind = query;
+    $trail.set([...$trail.get(), currentStep()]);
+    if (name === $serverName.get()) applyPendingFind();
+    else window.location.hash = name;
+}
+
+// A link to this exact node that can be pasted anywhere.
+export async function copyNodeLink(id: NodeId): Promise<void> {
+    const url = new URL(window.location.href);
+    url.searchParams.set('node', String(id));
+    const preview = $preview.get();
+    if (preview?.listing) url.searchParams.set('map', preview.listing);
+    else if (!$serverName.get()) {
+        toast('Save this map first: an unsaved map has no address', 'error');
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(url.toString());
+        toast('Link to this node copied', 'success');
+    } catch (e) {
+        toast(`Copy failed: ${(e as Error).message}`, 'error');
+    }
+}
+
+export const $notesOpen: Signal<boolean> = new Signal(false);
+
+// One undo step per stretch of typing: the panel calls this when a field gains
+// focus, then writes as the user types.
+export function beginDetailEdit(): void {
+    snapshot();
+}
+
+export function setNodeDetail(id: NodeId, field: 'notes' | 'ref', value: string): void {
+    $nodes.update(list => {
+        const node = list.find(n => n.id === id);
+        if (!node) return list;
+        if (value) node[field] = value;
+        else delete node[field];
+        return list;
     });
 }
+
 
 export function wheel(e: WheelEvent) {
     // Trackpad pinch arrives as wheel + ctrlKey; Cmd/Ctrl+wheel zooms too.
@@ -1713,7 +2047,7 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
         $scene.set({ x: parsed.scene.x, y: parsed.scene.y });
     }
     $zoom.set(typeof parsed.zoom === 'number' && Number.isFinite(parsed.zoom) ? clampZoom(parsed.zoom) : 1);
-    $layout.set(['free', 'mindmap', 'right', 'down', 'radial'].includes(parsed.layout as string) ? parsed.layout! : 'free');
+    $layout.set(['free', 'mindmap', 'right', 'down', 'radial', 'timeline'].includes(parsed.layout as string) ? parsed.layout! : 'free');
     $spacing.set(parsed.spacing && typeof parsed.spacing.level === 'number' && typeof parsed.spacing.sibling === 'number'
         ? { level: parsed.spacing.level, sibling: parsed.spacing.sibling } : { ...DEFAULT_SPACING });
     $linkRoute.set(LINK_ROUTES.includes(parsed.linkRoute as LinkRoute) ? parsed.linkRoute! : 'curve');
@@ -1721,6 +2055,7 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
     $strokes.set(Array.isArray(parsed.strokes) ? parsed.strokes.filter(validStroke) : []);
     $frames.set(Array.isArray(parsed.frames) ? parsed.frames.filter(validFrame) : []);
     $presenting.set(false);
+    $origin.set(validOrigin(parsed.origin) ? parsed.origin : null);
     $nodes.set([...parsed.nodes]);
     $links.set([...parsed.links]);
 
@@ -1736,7 +2071,12 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
 type ParsedDocument = {
     nodes: Node[], links: Link[], scene?: {x: number, y: number}, zoom?: number,
     layout?: LayoutMode, strokes?: Stroke[], frames?: Frame[], spacing?: Spacing, linkRoute?: LinkRoute, linkEnds?: LinkEnds,
+    origin?: DocOrigin,
 };
+
+function validOrigin(o: any): o is DocOrigin {
+    return !!o && typeof o.listing === 'string' && typeof o.title === 'string' && typeof o.owner === 'string';
+}
 
 function validStroke(s: any): s is Stroke {
     return s && typeof s.id === 'string' && Array.isArray(s.points) && s.points.every((v: unknown) => typeof v === 'number')
@@ -1759,6 +2099,8 @@ function normalizeNode(node: Node) {
         text: node.text,
         size: node.size,
         type: node.type,
+        notes: node.notes ?? null,
+        ref: node.ref ?? null,
     };
 }
 
@@ -1863,16 +2205,16 @@ async function loadContent(content: string, invalidMessage: string): Promise<boo
     return applyImportedContent(content, invalidMessage);
 }
 
-export function doExportToServer(): void {
-    const nodes = $nodes.get();
-    exportToServer(
-        documentJson(),
-        nodes.map((n) => n.text).filter(Boolean).join('\n')
-    ).then((saved) => {
-        // the document now lives on the server; don't resurrect a stale
-        // local copy on the next bare-URL visit
-        if (saved) clearAutosave();
-    });
+// Resolves whether the document was saved.
+export async function doExportToServer(): Promise<boolean> {
+    const saved = await exportToServer(documentJson(), documentSearchText($nodes.get(), $links.get()));
+    // the document now lives on the server; don't resurrect a stale
+    // local copy on the next bare-URL visit
+    if (saved) {
+        clearAutosave();
+        $preview.set(null);
+    }
+    return saved;
 }
 
 // "Load from server" menu action - prompts for a document name the same
@@ -1887,13 +2229,107 @@ export async function doImportFromServer(): Promise<void> {
     window.location.hash = name;
 }
 
+const SAFE_COLOR = /^(#[0-9a-f]{3,8}|[a-z]{3,20}|rgba?\([\d\s.,%]+\)|hsla?\([\d\s.,%]+\)|var\(--[a-z0-9-]+\))$/i;
+const SAFE_LENGTH = /^\d{1,3}(\.\d+)?px$/;
+
+// Node and link style fields go straight into style attributes. From a stranger's
+// document, a "color" like url(https://...) would make every viewer's browser
+// call that server, so anything that is not plainly a color or a length goes.
+export function sanitizeSharedDocument(content: string): string {
+    let doc: any;
+    try {
+        doc = JSON.parse(content);
+    } catch (e) {
+        return content;
+    }
+    if (!doc || typeof doc !== 'object') return content;
+    const clean = (item: any, colorKey: string, lengthKeys: string[], numberKeys: string[]) => {
+        if (!item || typeof item !== 'object') return;
+        if (item[colorKey] !== undefined && item[colorKey] !== '' && !(typeof item[colorKey] === 'string' && SAFE_COLOR.test(item[colorKey]))) item[colorKey] = '';
+        for (const key of lengthKeys) if (item[key] !== undefined && !(typeof item[key] === 'string' && SAFE_LENGTH.test(item[key]))) delete item[key];
+        for (const key of numberKeys) if (item[key] !== undefined && !Number.isFinite(item[key])) delete item[key];
+    };
+    if (Array.isArray(doc.nodes)) doc.nodes.forEach((n: any) => {
+        clean(n, 'color', ['size'], ['minWidth', 'maxWidth', 'minHeight']);
+        if (n && (!Number.isFinite(n.width) || !Number.isFinite(n.height))) { n.width = 140; n.height = 40; }
+        if (n && (!Number.isFinite(n.x) || !Number.isFinite(n.y))) { n.x = 0; n.y = 0; }
+    });
+    if (Array.isArray(doc.links)) doc.links.forEach((l: any) => clean(l, 'color', ['textSize'], ['bend']));
+    if (Array.isArray(doc.frames)) doc.frames.forEach((f: any) => clean(f, 'color', [], []));
+    if (Array.isArray(doc.strokes)) doc.strokes.forEach((st: any) => clean(st, 'color', [], ['width']));
+    return JSON.stringify(doc);
+}
+
 // Loads a document someone shared through a public link. It isn't the
 // visitor's document: the hash/server name are cleared, so a save makes the
 // visitor their own copy instead of addressing the owner's file.
-export async function loadSharedDocument(content: string): Promise<void> {
-    if (window.location.hash) history.replaceState(null, '', window.location.pathname + window.location.search);
-    $serverName.set(undefined);
-    await loadContent(content, 'Invalid document format');
+//
+// It opens as a preview: autosave pauses, so whatever the visitor had open is
+// still there when they close it. Nothing can be lost, so a local document
+// needs no "replace?" prompt. A server document can have unsaved edits, so it
+// keeps the prompt. Cloning ends the preview and makes the document theirs.
+export async function loadSharedDocument(rawContent: string, preview: DocPreview): Promise<boolean> {
+    const content = sanitizeSharedDocument(rawContent);
+    const fromServer = !!$serverName.get();
+    let loaded: boolean;
+    if (fromServer) {
+        loaded = await loadContent(content, 'Invalid document format');
+        if (!loaded) return false;
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        $serverName.set(undefined);
+    } else {
+        window.clearTimeout(autosaveTimer);
+        writeAutosave();
+        $preview.set(preview);
+        loaded = applyImportedContent(content, 'Invalid document format');
+        if (!loaded) $preview.set(null);
+    }
+    if (loaded) {
+        $preview.set(preview);
+        $origin.set(preview.listing ? { listing: preview.listing, title: preview.title, owner: preview.owner } : $origin.get());
+        await settleAndFit();
+        applyPendingFocus();
+    }
+    return loaded;
+}
+
+// Leaves a preview and goes back to the visitor's own unsaved work, if any.
+export function closePreview(): void {
+    dropUrlParams('map', 'node');
+    $preview.set(null);
+    $origin.set(null);
+    $nodes.set([]);
+    $links.set([]);
+    $lines.set([]);
+    $strokes.set([]);
+    $frames.set([]);
+    $selection.set([]);
+    makeNodesMap([]);
+    $layout.set('free');
+    $scene.set({ x: 0, y: 0 });
+    $zoom.set(1);
+    resetUndoHistory();
+    restoreAutosave();
+}
+
+// Turns a preview into the visitor's own copy. Autosave resumes and takes over
+// the local slot, so any unsaved work of theirs needs an explicit yes first.
+export async function clonePreview(): Promise<boolean> {
+    if (!$preview.get()) return false;
+    let hasLocal = false;
+    try {
+        hasLocal = !!localStorage.getItem(AUTOSAVE_KEY);
+    } catch (e) {}
+    if (hasLocal && !await askConfirm('Keep this map as your own? It replaces the unsaved diagram in this browser.', 'Replace')) return false;
+    dropUrlParams('map', 'node');
+    $preview.set(null);
+    writeAutosave();
+    return true;
+}
+
+async function settleAndFit(): Promise<void> {
+    await tick();
+    zoomToFit();
 }
 
 export async function loadFromServer(name: string): Promise<void> {
@@ -1906,8 +2342,14 @@ export async function loadFromServer(name: string): Promise<void> {
             : `Open failed: ${(e as Error).message}`, 'error');
         return;
     }
-    if (content) {
-        await loadContent(content, 'Invalid document format');
+    if (content && await loadContent(content, 'Invalid document format')) {
+        $preview.set(null);
+        await tick();
+        applyPendingFocus();
+        applyPendingFind();
+    } else {
+        pendingFocus = null;
+        pendingFind = null;
     }
 }
 

@@ -1,11 +1,11 @@
 import { nanoid } from 'nanoid';
 import {
     $nodes, $links, $selection, $selectedLink, $editing, $mouse, $layout, $spacing,
-    snapshot, makeNodesMap, makeLines, tick, resize, toScene, deleteSelection, setLayout,
+    $frames, snapshot, makeNodesMap, makeLines, tick, resize, toScene, deleteSelection, setLayout, zoomToFit,
 } from './store';
 import { DASHES, DEFAULT_DASH, DEFAULT_NODE_FONT_SIZE, DEFAULT_NODE_TYPE, DEFAULT_WIDTH, LINK_ROUTES, UNSELECTED, type LayoutMode, type Link, type Node } from './types';
 import { computeLayout } from './layout';
-import { blankNode, parseMermaid, parseOutline, toMermaid, toOutline } from './textFormats';
+import { blankNode, parseMarkdown, parseMermaid, parseOutline, toMarkdown, toMermaid, toOutline } from './textFormats';
 import { sanitizeHtml } from '../util';
 import { isTypingTarget } from '../ui/keys';
 import { toast } from '../ui/toast';
@@ -58,6 +58,8 @@ function parseClip(json: string): Clip | null {
                 color: typeof n.color === 'string' ? n.color : '',
                 size: typeof n.size === 'string' ? n.size : DEFAULT_NODE_FONT_SIZE,
                 type: typeof n.type === 'number' ? n.type : DEFAULT_NODE_TYPE,
+                ...(typeof n.notes === 'string' ? { notes: n.notes } : {}),
+                ...(typeof n.ref === 'string' ? { ref: n.ref } : {}),
             }));
         const links: Link[] = data.links
             .filter((l: any) => l && l.one !== undefined && l.two !== undefined)
@@ -87,10 +89,14 @@ function parseClip(json: string): Clip | null {
 // modes lay out the whole diagram anyway).
 async function insertClip(clip: Clip, at: { x: number; y: number } | null, offset = 0, attachTo?: Node['id'],
                           arrange?: Exclude<LayoutMode, 'free'>): Promise<void> {
-    const xs = clip.nodes.map(n => n.x);
-    const ys = clip.nodes.map(n => n.y);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    // a loop, not Math.min(...xs): a big paste would overflow the call stack
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const n of clip.nodes) {
+        minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x);
+        minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
+    }
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
     const dx = at ? at.x - cx : offset;
     const dy = at ? at.y - cy : offset;
 
@@ -111,8 +117,8 @@ async function insertClip(clip: Clip, at: { x: number; y: number } | null, offse
 
     snapshot();
     const start = $nodes.get().length;
-    $nodes.update(list => { list.push(...nodes); return list; });
-    $links.update(list => { list.push(...links); return list; });
+    $nodes.update(list => { for (const n of nodes) list.push(n); return list; });
+    $links.update(list => { for (const l of links) list.push(l); return list; });
     makeNodesMap($nodes.get());
     $selection.set(nodes.map((_, k) => start + k));
     $selectedLink.set(UNSELECTED);
@@ -139,11 +145,11 @@ function mouseScene() {
     return toScene(mouse.x, mouse.y);
 }
 
-// Mermaid (flowchart or mindmap) or an indented outline becomes nodes,
+// Mermaid (flowchart or mindmap), Markdown or an indented outline becomes nodes,
 // laid out as a tree. Pasted under a single selected node, the new roots
 // become its children.
 async function pasteText(text: string, at?: { x: number; y: number }): Promise<void> {
-    const parsed = parseMermaid(text) ?? parseOutline(text);
+    const parsed = parseMermaid(text) ?? parseMarkdown(text) ?? parseOutline(text);
     if (!parsed.nodes.length) return;
     const wasEmpty = $nodes.get().length === 0;
     const arrange = parsed.layout ?? 'right';
@@ -242,6 +248,23 @@ async function writeText(text: string, what: string): Promise<void> {
 export function copyAsOutline(): Promise<void> {
     const clip = scope();
     return writeText(toOutline(clip.nodes, clip.links), 'Outline');
+}
+
+export function copyAsMarkdown(): Promise<void> {
+    const clip = scope();
+    return writeText(toMarkdown(clip.nodes, clip.links, { frames: $frames.get() }), 'Markdown');
+}
+
+// Starts an empty canvas from plain text (a template): lay it out, switch to
+// its layout mode, and show all of it.
+export async function insertTemplate(text: string, layout: Exclude<LayoutMode, 'free'>): Promise<void> {
+    const parsed = parseMermaid(text) ?? parseMarkdown(text) ?? parseOutline(text);
+    const at = toScene(window.innerWidth / 2, window.innerHeight / 2);
+    await insertClip({ nodes: parsed.nodes, links: parsed.links }, at, 0, undefined, layout);
+    setLayout(layout);
+    $selection.set([]);
+    await tick();
+    zoomToFit();
 }
 
 export function copyAsMermaid(): Promise<void> {

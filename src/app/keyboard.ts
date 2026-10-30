@@ -5,7 +5,7 @@ import {
     alignFirst, alignLast, center, equalSpacing, mirror, rotateNodeSize, rotateNodeType,
     rotateLineWidth, rotateLineDash, rotateArrows, lineText, lineDelete, toggleLinkArrow,
     spaceDown, spaceUp, $presenting, $selectedStrokes, deleteSelectedStrokes, $tool, $layout, setTool, selectNeighbor, toggleCollapse,
-    groupSelection, ungroupSelection, startPresenting, stopPresenting, revealStep, revealAll, revealReset, zoomToFit,
+    openFind, $notesOpen, closeFind, $findOpen, groupSelection, ungroupSelection, startPresenting, stopPresenting, revealStep, revealAll, revealReset, zoomToFit,
 } from '../data/store';
 import { duplicateSelection } from '../data/clipboard';
 import { copyAsPng } from '../data/exportImage';
@@ -76,6 +76,8 @@ export async function keydown(e: KeyboardEvent): Promise<void> {
     if (mod) {
         const lower = key.toLowerCase();
         if (lower === 's') { e.preventDefault(); doExportToServer(); return; }
+        if (lower === 'f' && !e.shiftKey) { e.preventDefault(); openFind(); return; }
+        if (lower === 'i' && !e.shiftKey) { e.preventDefault(); $notesOpen.set(!$notesOpen.get()); return; }
         if (lower === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
         if (lower === 'y' && !e.shiftKey) { e.preventDefault(); redo(); return; }
         if (e.shiftKey && e.code === 'KeyE') { e.preventDefault(); copyAsPng(); return; }
@@ -105,6 +107,7 @@ export async function keydown(e: KeyboardEvent): Promise<void> {
 
     if (key === 'Escape') {
         if ($help.get()) $help.set(false);
+        else if ($findOpen.get()) closeFind();
         else if ($tool.get() !== 'select') setTool('select');
         else if ($colorPopover.get()) $colorPopover.set(null);
         else if ($spacingPopover.get()) $spacingPopover.set(null);

@@ -72,3 +72,16 @@ test('spacing widens the gaps', () => {
     expect(roomy.get('a')!.x - 500).toBeGreaterThan(tight.get('a')!.x - 500)
     expect(roomy.get('d')!.y - roomy.get('a')!.y).toBeGreaterThan(tight.get('d')!.y - tight.get('a')!.y)
 })
+
+test('timeline puts events on one axis with details alternating around it', () => {
+    const n = (id: string): Node => ({ id, x: 0, y: 0, width: 100, height: 40, minWidth: 0, minHeight: 0, color: '', text: id });
+    const nodes = ['root', 'e1', 'e2', 'd1', 'd2'].map(n);
+    const link = (one: string, two: string): Link => ({ one, two, direction: 'none' });
+    const pos = computeLayout('timeline', nodes, [link('root', 'e1'), link('root', 'e2'), link('e1', 'd1'), link('e2', 'd2')]);
+    expect(pos.get('e1')!.y).toBe(pos.get('root')!.y);
+    expect(pos.get('e2')!.y).toBe(pos.get('root')!.y);
+    expect(pos.get('e2')!.x).toBeGreaterThan(pos.get('e1')!.x + 100);
+    expect(pos.get('d1')!.x).toBe(pos.get('e1')!.x);
+    expect(pos.get('d1')!.y).toBeGreaterThan(0);
+    expect(pos.get('d2')!.y).toBeLessThan(0);
+});

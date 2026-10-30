@@ -113,6 +113,9 @@ import './ui/command-palette';
 
 import './color-picker';
 import './ui/context-menu';
+import './ui/find-bar';
+import './ui/notes-panel';
+import './ui/directory-panel';
 import { $toasts as toasts, toast } from './ui/toast';
 import { $dialog as dialog } from './ui/dialog';
 import { icons } from './ui/icons';
@@ -121,15 +124,27 @@ import type { Line, Link, Node } from './data/types';
 import { determineArrow } from './data/directions';
 import { makeShape } from './geo';
 import { FOLDERFOO_HOST, TENANT_ID } from './server-config';
-import { publicToken, loadPublicLink, loadPublicFolderDocument } from './data/remote';
+import { publicToken, loadPublicLink, loadPublicFolderDocument, initialMap, initialExplore } from './data/remote';
+import { $directoryOpen, $publishOpen, cloneOpenListing, markdownUrl, openListing, reportOpenListing } from './data/directory';
+import {
+    $findOpen, $findSet, $nodeMap, $notesOpen, $origin, $preview, $trail, closePreview, followNodeRef, goBack, measureNode, openFind,
+} from './data/store';
+import { TEMPLATES } from './data/templates';
+import { runTemplate } from './app/actions';
 import { $mcpConnectionState, $mcpChannel, $mcpAppLabel, handleConnectClick } from './mcp-connect';
 
 const SWATCHES = ['#ffffff', '#f8d7da', '#ffe8cc', '#fff3bf', '#d3f9d8', '#d0ebff', '#e5dbff', '#dee2e6',
     '#e03131', '#f08c00', '#fab005', '#2f9e44', '#1971c2', '#7048e8', '#495057', '#212529'];
 
+// Below this every node stays in the DOM, as it always has.
+const CULL_ABOVE = 400;
+const TEXTLESS_BELOW = 0.2;
+
 const SHORTCUTS: [string, [string, string][]][] = [
     ['Anywhere', [
         [`${sc('mod+k')}, or Shift twice`, 'Command palette: search every action'],
+        [sc('mod+f'), 'Find in this map, and jump to each match'],
+        [sc('mod+i'), 'Notes and links for the selected node'],
     ]],
     ['Touch and pen', [
         ['One finger on canvas', 'Pan (a pen draws a selection box)'],
@@ -203,8 +218,7 @@ async function openPublicLink(token: string): Promise<void> {
     try {
         const view = await loadPublicLink(token);
         if (view.type === 'file') {
-            if (typeof view.content === 'string') await loadSharedDocument(view.content);
-            toast(`Viewing ${view.path} shared by ${view.owner}`, 'info');
+            if (typeof view.content === 'string') await loadSharedDocument(view.content, { title: view.path, owner: view.owner });
             return;
         }
         const docs = (view.files ?? []).map((f) => (f.folderPath ? `${f.folderPath}/${f.name}` : f.name)).sort();
@@ -231,7 +245,7 @@ function showPublicFolderPanel(token: string, view: { owner: string; path: strin
         for (const b of panel.querySelectorAll('button')) b.style.fontWeight = b === button ? '600' : '400';
         try {
             const content = await loadPublicFolderDocument(token, relPath);
-            if (content) await loadSharedDocument(content);
+            if (content) await loadSharedDocument(content, { title: relPath, owner: view.owner });
         } catch (e) {
             toast((e as Error).message, 'error');
         }
@@ -268,8 +282,10 @@ export class MindFooApp extends LitElement {
             // A redeemed folder share link opens File Open inside that folder.
             el.setAttribute('open-shared-folders', '');
             document.body.appendChild(el);
-        });
+        }).catch(() => { /* folderfoo unreachable: the app still works locally */ });
         if (publicToken) void openPublicLink(publicToken);
+        else if (initialMap) void openListing(initialMap);
+        if (initialExplore) $directoryOpen.set(true);
 
         // Toast for "someone joined via one of your share links" - see
         // remote.ts's checkShareLinkJoins() call, which is what actually
@@ -277,7 +293,7 @@ export class MindFooApp extends LitElement {
         // as the profile-circle widget above.
         import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/folderfoo-share-toast.js`).then(() => {
             document.body.appendChild(document.createElement('folderfoo-share-toast'));
-        });
+        }).catch(() => {});
 
         const onFileOpen = (e: Event) => {
             const name = (e as CustomEvent<{ name: string }>).detail?.name;
@@ -408,11 +424,7 @@ export class MindFooApp extends LitElement {
         }
         if (existing) return;
 
-        const observer = new ResizeObserver(() => {
-            const currentIndex = nodes.get().findIndex((n) => n.id === nodeId);
-            if (currentIndex === -1) return;
-            resize(currentIndex, true);
-        });
+        const observer = new ResizeObserver(() => measureNode(nodeId));
         observer.observe(el);
         this.resizeObservers.set(nodeId, observer);
     }
@@ -803,6 +815,34 @@ export class MindFooApp extends LitElement {
             color: gray;
             font-size: 18px;
         }
+        .starters {
+            display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 12px;
+            max-width: calc(100vw - 32px); pointer-events: auto;
+        }
+        .starters button {
+            font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--menu-fg); background: var(--menu-bg);
+            border: none; border-radius: 16px; padding: 7px 14px; cursor: pointer; box-shadow: 0 1px 6px #00000030;
+            display: inline-flex; gap: 5px; align-items: center;
+        }
+        .starters button:hover { background: var(--accent); color: #fff; }
+        .context-bar {
+            position: fixed; top: 54px; left: 10px; z-index: 100; display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+            max-width: calc(100vw - 20px); box-sizing: border-box; padding: 4px; border-radius: 8px; background: var(--menu-bg); color: var(--menu-fg);
+            box-shadow: 0 2px 12px #00000040; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .context-bar .what { padding: 0 6px; overflow-wrap: anywhere; }
+        .context-bar button {
+            font: inherit; color: inherit; background: #ffffff18; border: none; border-radius: 5px; padding: 4px 8px; cursor: pointer;
+            display: inline-flex; gap: 4px; align-items: center;
+        }
+        .context-bar button:hover { background: #ffffff30; }
+        .context-bar button.primary { background: var(--accent); color: #fff; }
+        .node-badges { position: absolute; top: -9px; right: -6px; display: flex; gap: 2px; pointer-events: auto; }
+        .node-badges button {
+            width: 18px; height: 18px; padding: 0; border: none; border-radius: 9px; cursor: pointer; font-size: 11px; line-height: 18px;
+            background: var(--accent); color: #fff;
+        }
+        @media (pointer: coarse) { .node-badges button { width: 26px; height: 26px; border-radius: 13px; line-height: 26px; font-size: 14px; } .node-badges { top: -14px; } }
         .emptyScene small {
             font-size: 13px;
         }
@@ -987,10 +1027,30 @@ export class MindFooApp extends LitElement {
             && !presenting.get() && tool.get() === 'select'
             ? nodeList[selectionValue[0]] : undefined;
         const hidden = hiddenIds();
+        const nodeMapValue = $nodeMap.get();
         const focus = focusSet();
         const presentingValue = presenting.get();
         const toolValue = tool.get();
-        const dim = (id: Node['id']) => focus !== null && !focus.has(id);
+        const findSet = $findSet.get();
+        const dim = (id: Node['id']) => (focus !== null && !focus.has(id)) || (findSet !== null && !findSet.has(id));
+        // Big maps only put what is in view into the DOM, and when zoomed far
+        // out draw nodes as shapes without text nobody could read anyway.
+        const big = nodeList.length > CULL_ABOVE;
+        const margin = 400 / zoomValue;
+        const viewLeft = -sceneValue.x / zoomValue - margin, viewTop = -sceneValue.y / zoomValue - margin;
+        const viewRight = (window.innerWidth - sceneValue.x) / zoomValue + margin;
+        const viewBottom = (window.innerHeight - sceneValue.y) / zoomValue + margin;
+        const inView = (n: Node) => n.x + n.width / 2 >= viewLeft && n.x - n.width / 2 <= viewRight
+            && n.y + n.height / 2 >= viewTop && n.y - n.height / 2 <= viewBottom;
+        const culled = (n: Node, i: number) => big && !inView(n) && selectionValue.indexOf(i) === -1;
+        const lineCulled = (link: Link | undefined, i: number) => {
+            if (!big || !link || i === selectedLinkValue) return false;
+            const a = nodeMapValue[link.one], b = nodeMapValue[link.two];
+            if (!a || !b) return false;
+            return Math.max(a.x, b.x) < viewLeft || Math.min(a.x, b.x) > viewRight
+                || Math.max(a.y, b.y) < viewTop || Math.min(a.y, b.y) > viewBottom;
+        };
+        const textless = big && zoomValue < TEXTLESS_BELOW && !editingValue;
         const dragFrom = linkDragValue !== -1 ? nodeList[linkDragValue] : undefined;
         const dragTo = dragFrom ? toScene(mouseValue.x, mouseValue.y) : undefined;
 
@@ -998,9 +1058,11 @@ export class MindFooApp extends LitElement {
             ${nodeList.length === 0 ? (coarse ? html`<div class="emptyScene">
                 <span>Double-tap anywhere, or tap +, to add a node</span>
                 <small>Long-press for options · Pinch to zoom · Drag with one finger to pan</small>
+                ${this.renderStarters()}
             </div>` : html`<div class="emptyScene">
                 <span>Double-click anywhere to add a node</span>
-                <small>Right-click for options · Paste a list or Mermaid to build a map · ? for shortcuts</small>
+                <small>Right-click for options · Paste a list, Markdown or Mermaid to build a map · ? for shortcuts</small>
+                ${this.renderStarters()}
             </div>`) : nothing}
 
             <div class="container" style="left:${sceneValue.x}px; top:${sceneValue.y}px; transform: scale(${zoomValue}); transform-origin: 0 0;">
@@ -1032,7 +1094,7 @@ export class MindFooApp extends LitElement {
 
                     ${repeat(lineList, (line) => line.id, (line, i) => {
                         const link = linkList[i];
-                        if (line.hidden) return nothing;
+                        if (line.hidden || lineCulled(link, i)) return nothing;
                         const faded = link && (dim(link.one) || dim(link.two));
                         const width = link?.width || 2;
                         const pattern = dashPattern(link?.dash, width, link?.flow);
@@ -1082,7 +1144,7 @@ export class MindFooApp extends LitElement {
                         </g>`;
                     })}
 
-                    ${repeat(nodeList, (node) => node.id, (node, i) => hidden.has(node.id) ? nothing : svg`
+                    ${repeat(nodeList, (node) => node.id, (node, i) => hidden.has(node.id) || culled(node, i) ? nothing : svg`
                         <path role="none"
                             class="${classMap({ shp: true, selected: selectionValue.indexOf(i) > -1, textNode: node.type === NodeType.text })}"
                             opacity=${dim(node.id) ? 0.2 : 1}
@@ -1107,7 +1169,7 @@ export class MindFooApp extends LitElement {
 
                 ${lineList.map((line, i) => {
                     const link = linkList[i];
-                    if (!link?.text || !link.labelBox || line.hidden || !line.labelAt) return nothing;
+                    if (!link?.text || !link.labelBox || line.hidden || !line.labelAt || textless || lineCulled(link, i)) return nothing;
                     const faded = dim(link.one) || dim(link.two);
                     return html`
                         <div id="lbl${i}" class="link-label ${i === selectedLinkValue ? 'picked' : ''}"
@@ -1121,10 +1183,11 @@ export class MindFooApp extends LitElement {
                     `;
                 })}
 
-                ${repeat(nodeList, (node) => node.id, (node, i) => hidden.has(node.id) ? nothing
+                ${repeat(nodeList, (node) => node.id, (node, i) => hidden.has(node.id) || culled(node, i)
+                    || (textless && selectionValue.indexOf(i) === -1) ? nothing
                     : this.renderNode(node, i, editingValue, selectionValue, resizingWidthValue, dim(node.id)))}
 
-                ${this.renderCollapseBadges(nodeList, selectionValue, hidden, presentingValue)}
+                ${this.renderCollapseBadges(nodeList, selectionValue, hidden, presentingValue, culled)}
 
                 <svg class="overlay-svg">
                     ${strokes.get().map(st => {
@@ -1177,6 +1240,11 @@ export class MindFooApp extends LitElement {
             ${presentingValue ? this.renderPresenterBar() : this.renderToolbar(zoomValue, selectionValue.length > 0 || selectedLinkValue > -1 || toolValue === 'pen' || selectedStrokes.get().length > 0)}
             ${!presentingValue && coarse ? this.renderActionBar(nodeList, selectionValue, selectedLinkValue, editingValue) : nothing}
             <mf-presenter-overlay .active=${presentingValue}></mf-presenter-overlay>
+            ${presentingValue ? nothing : this.renderContextBar()}
+            ${$findOpen.get() && !presentingValue ? html`<mf-find-bar></mf-find-bar>` : nothing}
+            ${$notesOpen.get() && !presentingValue ? html`<mf-notes-panel></mf-notes-panel>` : nothing}
+            ${$directoryOpen.get() ? html`<mf-directory-panel></mf-directory-panel>` : nothing}
+            ${$publishOpen.get() ? html`<mf-publish-dialog></mf-publish-dialog>` : nothing}
             ${this.renderColorPopover()}
             ${this.renderSpacingPopover()}
             ${contextMenu.get() ? html`
@@ -1197,6 +1265,34 @@ export class MindFooApp extends LitElement {
         `;
     }
 
+    private renderStarters() {
+        const stop = (e: Event) => e.stopPropagation();
+        return html`<div class="starters" data-ui @mousedown=${stop} @dblclick=${stop} @contextmenu=${stop}>
+            ${TEMPLATES.map(t => html`<button @click=${() => runTemplate(t.id)}>${t.label}</button>`)}
+            <button @click=${() => $directoryOpen.set(true)}>${icons.globe} Public maps</button>
+        </div>`;
+    }
+
+    // What is open when it is someone else's map, and the way back through links.
+    private renderContextBar() {
+        const preview = $preview.get();
+        const trail = $trail.get();
+        const origin = $origin.get();
+        if (!preview && !trail.length && !origin) return nothing;
+        const last = trail[trail.length - 1];
+        const stop = (e: Event) => e.stopPropagation();
+        return html`<div class="context-bar" data-ui @mousedown=${stop} @dblclick=${stop} @contextmenu=${stop}>
+            ${last ? html`<button title="Back to ${last.label}" @click=${goBack}>${icons.back} ${last.label}</button>` : nothing}
+            ${preview ? html`
+                <span class="what"><b>${preview.title}</b> by ${preview.owner}${preview.license ? ` · ${preview.license}` : ''} · preview</span>
+                <button class="primary" title="Make this your own copy, then edit and save it" @click=${cloneOpenListing}>Clone</button>
+                ${preview.listing && preview.hasMarkdown ? html`<button @click=${async () => window.open(await markdownUrl(preview.listing!), '_blank', 'noopener,noreferrer')}>Markdown</button>` : nothing}
+                ${preview.listing ? html`<button @click=${reportOpenListing}>Report</button>` : nothing}
+                <button aria-label="Close preview" title="Close and return to your own map" @click=${closePreview}>✕</button>
+            ` : origin ? html`<span class="what">Cloned from <b>${origin.title}</b> by ${origin.owner}</span>` : nothing}
+        </div>`;
+    }
+
     private renderToolbar(zoomValue: number, hasSelection: boolean) {
         const state = $mcpConnectionState.get();
         return html`
@@ -1206,6 +1302,8 @@ export class MindFooApp extends LitElement {
                 @contextmenu=${(e: MouseEvent) => e.stopPropagation()}>
                 <button title="File" @click=${(e: MouseEvent) => openFileMenu(e.currentTarget as HTMLElement)}>${icons.menu}</button>
                 <button class="wide" title="Command palette (${sc('mod+k')}, or Shift twice)" @click=${openPalette}>${icons.search}</button>
+                <button title="Find in this map (${sc('mod+f')})" @click=${openFind}>${icons.find}</button>
+                <button title="Public maps" @click=${() => $directoryOpen.set(true)}>${icons.globe}</button>
                 <span class="sep"></span>
                 <button title="Undo (${sc('mod+z')})" @click=${undo}>${icons.undo}</button>
                 <button title="Redo (${sc('mod+shift+z')})" @click=${redo}>${icons.redo}</button>
@@ -1481,9 +1579,10 @@ export class MindFooApp extends LitElement {
         `;
     }
 
-    private renderCollapseBadges(nodeList: Node[], selectionValue: number[], hidden: Set<Node['id']>, presentingValue: boolean) {
+    private renderCollapseBadges(nodeList: Node[], selectionValue: number[], hidden: Set<Node['id']>, presentingValue: boolean,
+                                 culled: (node: Node, i: number) => boolean) {
         return nodeList.map((node, i) => {
-            if (hidden.has(node.id)) return nothing;
+            if (hidden.has(node.id) || culled(node, i)) return nothing;
             const collapsed = !!node.collapsed;
             const show = collapsed || (!presentingValue && selectionValue.length === 1 && selectionValue[0] === i && hasChildren(node.id));
             if (!show) return nothing;
@@ -1567,6 +1666,14 @@ export class MindFooApp extends LitElement {
                         }}
                     ></div>
                 ` : html`<div role="none" .innerHTML=${sanitizeHtml(node.text)}></div>`}
+                ${node.notes || node.ref ? html`<span class="node-badges">
+                    ${node.notes ? html`<button title="Notes" aria-label="Notes"
+                        @mousedown=${(e: MouseEvent) => e.stopPropagation()}
+                        @click=${() => { selection.set([i]); $notesOpen.set(true); }}>≡</button>` : nothing}
+                    ${node.ref ? html`<button title="Follow link" aria-label="Follow link"
+                        @mousedown=${(e: MouseEvent) => e.stopPropagation()}
+                        @click=${() => followNodeRef(node)}>↗</button>` : nothing}
+                </span>` : nothing}
                 ${node.maxWidth && (selectionValue.indexOf(i) > -1 || resizingWidthValue === i) ? html`
                     <div role="none" class="resize-handle"
                         style="pointer-events: auto;"

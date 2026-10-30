@@ -40,8 +40,8 @@ export function buildTree(nodes: Node[], links: Link[], hidden: Set<NodeId> = ne
         tree.roots.push(root);
         visited.add(root);
         const queue = [root];
-        while (queue.length) {
-            const id = queue.shift()!;
+        for (let at = 0; at < queue.length; at++) {
+            const id = queue[at];
             const kids: NodeId[] = [];
             for (const child of out.get(id) ?? []) {
                 if (visited.has(child)) continue;
@@ -168,6 +168,31 @@ function mindmap(tree: Tree, sizes: Sized, root: NodeId, side: (child: NodeId) =
     leftOut.forEach((p, id) => { if (id !== root) out.set(id, p); });
 }
 
+// A timeline: the root's children are events along a horizontal axis, spaced
+// by what hangs off them, with the details of each event stacked alternately
+// below and above the axis so neighbours do not collide.
+function timeline(tree: Tree, sizes: Sized, root: NodeId, out: Map<NodeId, Pos>, sp: Spacing) {
+    const subtree = (id: NodeId): NodeId[] => [id, ...(tree.children.get(id) ?? []).flatMap(subtree)];
+    const rootSize = sizes.get(root)!;
+    out.set(root, { x: 0, y: 0 });
+    let x = rootSize.w / 2 + sp.level;
+    (tree.children.get(root) ?? []).forEach((event, k) => {
+        const details = subtree(event).slice(1);
+        const eventSize = sizes.get(event)!;
+        const width = Math.max(eventSize.w, ...details.map(id => sizes.get(id)!.w));
+        const cx = x + width / 2;
+        out.set(event, { x: cx, y: 0 });
+        const dir = k % 2 === 0 ? 1 : -1;
+        let edge = eventSize.h / 2 + sp.sibling * 2;
+        for (const id of details) {
+            const h = sizes.get(id)!.h;
+            out.set(id, { x: cx, y: dir * (edge + h / 2) });
+            edge += h + sp.sibling;
+        }
+        x += width + sp.sibling * 2;
+    });
+}
+
 export function computeLayout(
     mode: Exclude<LayoutMode, 'free'>,
     nodes: Node[],
@@ -187,6 +212,7 @@ export function computeLayout(
         const local = new Map<NodeId, Pos>();
         if (mode === 'down') down(tree, sizes, root, local, sp);
         else if (mode === 'radial') radial(tree, sizes, root, local, sp);
+        else if (mode === 'timeline') timeline(tree, sizes, root, local, sp);
         else if (mode === 'right') horizontal(tree, sizes, root, tree.children.get(root) ?? [], 1, local, sp);
         else {
             const rootNode = byId.get(root)!;

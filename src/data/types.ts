@@ -33,12 +33,16 @@ export type Node = {
     // hides every node reachable through this node's outgoing links
     collapsed?: boolean,
     // nodes sharing a groupId select and move together
-    groupId?: string
+    groupId?: string,
+    // long-form detail, plain text or Markdown; the node itself stays short
+    notes?: string,
+    // where this node points: a page, a node, or another map (see refs.ts)
+    ref?: string
 } & {[key: string]: any}
 
 // 'free': positions are the user's. Every other mode computes positions
 // from the link tree on each change (see layout.ts).
-export type LayoutMode = 'free' | 'mindmap' | 'right' | 'down' | 'radial';
+export type LayoutMode = 'free' | 'mindmap' | 'right' | 'down' | 'radial' | 'timeline';
 
 // Freehand ink, in scene coordinates. points: flat [x0, y0, x1, y1, ...].
 export type Stroke = {

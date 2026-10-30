@@ -24,6 +24,8 @@ type FieldSpec =
 // from an agent (see comment there) - they're a DOM-measurement cache, not
 // agent-authored input, so they don't belong in the input-facing schema.
 export const NODE_FIELDS: Record<string, FieldSpec> = {
+	notes: { type: 'string', required: false },
+	ref: { type: 'string', required: false },
 	id: { type: 'nodeId', required: false },
 	x: { type: 'number', required: false },
 	y: { type: 'number', required: false },

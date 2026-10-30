@@ -1,6 +1,6 @@
 import { test, expect } from 'vitest'
-import { parseMermaid, parseOutline, toMermaid, toOutline } from './textFormats'
-import { NodeType } from './types'
+import { blankNode, parseMarkdown, parseMermaid, parseOutline, toMarkdown, toMermaid, toOutline } from './textFormats'
+import { NodeType, type Link } from './types'
 
 const texts = (p: { nodes: { text: string }[] }) => p.nodes.map(n => n.text)
 
@@ -52,3 +52,72 @@ test('toMermaid round-trips through parseMermaid', () => {
     expect(texts(again)).toEqual(['One', 'Two', 'Three'])
     expect(again.links.map(l => [l.direction, l.dash, l.text ?? ''])).toEqual([['right', '', 'go'], ['both', '4', '']])
 })
+
+test('toMarkdown writes the tree, notes, references and cross-links', () => {
+    const a = blankNode('Airframe'), b = blankNode('Wing'), c = blankNode('Fuel & oil');
+    b.notes = 'Holds the fuel.\nSecond line.';
+    c.ref = 'https://example.com/fuel';
+    const links: Link[] = [
+        { one: a.id, two: b.id, direction: 'none', text: 'has' },
+        { one: b.id, two: c.id, direction: 'none' },
+        { one: c.id, two: a.id, direction: 'right', text: 'feeds' },
+    ];
+    expect(toMarkdown([a, b, c], links, { title: 'Plane' })).toBe(`# Plane
+
+## Airframe
+
+### Wing
+
+_(has)_
+
+Holds the fuel.
+Second line.
+
+#### Fuel & oil
+
+See: <https://example.com/fuel>
+
+## Cross-links
+
+- Fuel & oil → Airframe: feeds
+`);
+});
+
+test('toMarkdown falls back to bullets past heading depth', () => {
+    const nodes = Array.from({ length: 9 }, (_, i) => blankNode(`n${i}`));
+    const links: Link[] = nodes.slice(1).map((n, i) => ({ one: nodes[i].id, two: n.id, direction: 'none' as const }));
+    const md = toMarkdown(nodes, links);
+    expect(md).toContain('###### n5');
+    expect(md).toContain('- n6');
+    expect(md).toContain('  - n7');
+});
+
+test('parseMarkdown reads headings, bullets and notes', () => {
+    const parsed = parseMarkdown('# Top\n\nSome detail.\n\n## Child\n- Bullet\n  - Nested\n\nMore.\n# Other')!;
+    expect(parsed.nodes.map(n => n.text)).toEqual(['Top', 'Child', 'Bullet', 'Nested', 'Other']);
+    expect(parsed.nodes[0].notes).toBe('Some detail.');
+    expect(parsed.nodes[3].notes).toBe('More.');
+    const byId = new Map(parsed.nodes.map(n => [n.id, n.text]));
+    expect(parsed.links.map(l => `${byId.get(l.one)}>${byId.get(l.two)}`)).toEqual(['Top>Child', 'Child>Bullet', 'Bullet>Nested']);
+    expect(parseMarkdown('no headings\n- just a list')).toBe(null);
+});
+
+test('Markdown round-trips structure, notes and cross-links', () => {
+    const a = blankNode('A'), b = blankNode('B'), c = blankNode('C');
+    b.notes = 'Note on B';
+    const links: Link[] = [
+        { one: a.id, two: b.id, direction: 'none' },
+        { one: a.id, two: c.id, direction: 'none' },
+        { one: b.id, two: c.id, direction: 'right', text: 'uses' },
+    ];
+    const parsed = parseMarkdown(toMarkdown([a, b, c], links))!;
+    expect(parsed.nodes.map(n => n.text)).toEqual(['A', 'B', 'C']);
+    expect(parsed.nodes[1].notes).toBe('Note on B');
+    expect(parsed.links.length).toBe(3);
+    expect(parsed.links[2].text).toBe('uses');
+});
+
+test('outline import handles far more than a few hundred rows', () => {
+    const rows = Array.from({ length: 5000 }, (_, i) => `row ${i}`).join('\n');
+    expect(parseOutline(rows).nodes.length).toBe(5000);
+});

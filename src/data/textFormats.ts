@@ -3,8 +3,9 @@ import { buildTree } from './layout';
 import { sanitizeHtml } from '../util';
 import {
     DEFAULT_DASH, DEFAULT_NODE_FONT_SIZE, DEFAULT_NODE_TYPE, DEFAULT_WIDTH, NodeType,
-    type LayoutMode, type Link, type Node, type NodeId, type Width,
+    type Frame, type LayoutMode, type Link, type Node, type NodeId, type Width,
 } from './types';
+import { parseRef } from './refs';
 import type { Direction } from './directions';
 
 // Plain-text diagram formats: indented outlines and Mermaid (flowchart and
@@ -39,7 +40,7 @@ function indentTree(rows: string[], toNode: (label: string) => Node | null): Par
     const nodes: Node[] = [];
     const links: Link[] = [];
     const stack: { indent: number; id: NodeId }[] = [];
-    for (const row of rows.slice(0, 500)) {
+    for (const row of rows.slice(0, 50000)) {
         if (!row.trim()) continue;
         const indent = row.match(/^\s*/)![0].replace(/\t/g, '    ').length;
         const node = toNode(row.trim());
@@ -57,6 +58,64 @@ function indentTree(rows: string[], toNode: (label: string) => Node | null): Par
 export function parseOutline(text: string): Parsed {
     return indentTree(text.split(/\r?\n/),
         label => blankNode(label.replace(/^([-*•+]|\d+[.)])\s+/, '')));
+}
+
+// --- Markdown ---
+
+const CROSS_LINKS = 'Cross-links';
+
+// Headings and bullets make the tree (a bullet hangs under the nearest heading
+// or less indented bullet). Other lines become the notes of the node above.
+// Reads what toMarkdown writes, plus Markdown from anywhere else.
+export function parseMarkdown(text: string): Parsed | null {
+    const lines = text.split(/\r?\n/);
+    if (!lines.some(line => /^#{1,6}\s+\S/.test(line))) return null;
+    const nodes: Node[] = [];
+    const links: Link[] = [];
+    // depth: heading level, or 7 + indent for a bullet
+    const stack: { depth: number; id: NodeId }[] = [];
+    let current: Node | null = null;
+    let notes: string[] = [];
+    let crossLinks = false;
+    const flushNotes = () => {
+        const body = notes.join('\n').trim();
+        if (current && body) current.notes = current.notes ? `${current.notes}\n\n${body}` : body;
+        notes = [];
+    };
+    const add = (depth: number, label: string) => {
+        flushNotes();
+        const node = blankNode(label);
+        while (stack.length && stack[stack.length - 1].depth >= depth) stack.pop();
+        if (stack.length) links.push(plainLink(stack[stack.length - 1].id, node.id));
+        stack.push({ depth, id: node.id });
+        nodes.push(node);
+        current = node;
+    };
+    const pendingCross: [string, string, string | undefined][] = [];
+    for (const line of lines.slice(0, 100000)) {
+        const heading = /^(#{1,6})\s+(.*\S)\s*$/.exec(line);
+        const bullet = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*\S)\s*$/.exec(line);
+        if (heading) {
+            crossLinks = heading[2] === CROSS_LINKS;
+            if (crossLinks) flushNotes(); else add(heading[1].length, heading[2]);
+        } else if (crossLinks) {
+            const edge = /^\s*-\s+(.+?) → (.+?)(?:: (.*))?$/.exec(line);
+            if (edge) pendingCross.push([edge[1], edge[2], edge[3]]);
+        } else if (bullet) {
+            add(7 + bullet[1].replace(/\t/g, '    ').length, bullet[2]);
+        } else {
+            notes.push(line);
+        }
+    }
+    flushNotes();
+    const byText = new Map(nodes.map(n => [n.text, n.id]));
+    for (const [from, to, label] of pendingCross) {
+        const one = byText.get(escapeHtml(from)), two = byText.get(escapeHtml(to));
+        if (one !== undefined && two !== undefined) {
+            links.push({ ...plainLink(one, two), direction: 'right', ...(label ? { text: label } : {}) });
+        }
+    }
+    return nodes.length ? { nodes, links } : null;
 }
 
 // --- Mermaid ---
@@ -212,6 +271,69 @@ export function toOutline(nodes: Node[], links: Link[]): string {
     };
     tree.roots.forEach(id => walk(id, 0));
     return out.join('\n');
+}
+
+// The whole document as Markdown: the tree as headings (then nested bullets once
+// headings run out), notes as body text, every other link as a cross-link. This
+// is the form to hand to an LLM, a student or a wiki, so nothing is left out.
+export function toMarkdown(nodes: Node[], links: Link[], options: { title?: string; frames?: Frame[] } = {}): string {
+    const tree = buildTree(nodes, links);
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const label = (id: NodeId) => htmlToText(byId.get(id)?.text ?? '') || '(untitled)';
+    const treeEdge = new Set<Link>();
+    const labelOf = new Map<NodeId, string>();
+    for (const link of links) {
+        if (tree.parent.get(link.two) === link.one && !labelOf.has(link.two) && !treeEdge.has(link)) {
+            treeEdge.add(link);
+            if (link.text) labelOf.set(link.two, link.text);
+        }
+    }
+    const out: string[] = [];
+    if (options.title) out.push(`# ${options.title}`, '');
+    const base = options.title ? 2 : 1;
+    const detail = (node: Node, prefix = '') => {
+        const edge = labelOf.get(node.id);
+        if (edge) out.push(`${prefix}_(${edge})_`, '');
+        if (typeof node.notes === 'string' && node.notes.trim()) {
+            for (const line of node.notes.trim().split('\n')) out.push(prefix + line);
+            out.push('');
+        }
+        const ref = parseRef(node.ref);
+        if (ref) {
+            out.push(`${prefix}See: ${ref.kind === 'url' ? `<${ref.url}>` : node.ref}`, '');
+        }
+    };
+    const walk = (id: NodeId, depth: number) => {
+        const node = byId.get(id)!;
+        const level = base + depth;
+        if (level <= 6) {
+            out.push(`${'#'.repeat(level)} ${label(id)}`, '');
+            detail(node);
+        } else {
+            const indent = '  '.repeat(level - 7);
+            out.push(`${indent}- ${label(id)}`);
+            detail(node, indent + '  ');
+        }
+        for (const child of tree.children.get(id) ?? []) walk(child, depth + 1);
+    };
+    tree.roots.forEach(id => walk(id, 0));
+
+    const cross = links.filter(l => !treeEdge.has(l) && byId.has(l.one) && byId.has(l.two));
+    if (cross.length) {
+        out.push(`${'#'.repeat(base)} ${CROSS_LINKS}`, '');
+        for (const link of cross) {
+            const [from, to] = link.direction === 'left' ? [link.two, link.one] : [link.one, link.two];
+            out.push(`- ${label(from)} → ${label(to)}${link.text ? `: ${link.text}` : ''}`);
+        }
+        out.push('');
+    }
+    const frames = options.frames ?? [];
+    if (frames.length) {
+        out.push(`${'#'.repeat(base)} Groups`, '');
+        for (const frame of frames) out.push(`- ${frame.title || 'Group'}: ${frame.nodeIds.map(label).join(', ')}`);
+        out.push('');
+    }
+    return out.join('\n').replace(/\n+$/, '\n');
 }
 
 const MERMAID_SHAPE: Record<number, [string, string]> = {

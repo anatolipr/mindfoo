@@ -11,11 +11,14 @@ import {
     zoomIn, zoomOut, setTool, $tool, type Tool,
     $selectedStrokes, deleteSelectedStrokes, setStrokeWidth,
     $linkRoute, $linkEnds, setLinkRoute, setDefaultLinkRoute, setLinkEnds, resetBend, setLabelStyle,
-    toggleLinkFlow, addSibling, startTapLink,
+    toggleLinkFlow, addSibling, startTapLink, openFind, $notesOpen, copyNodeLink,
 } from '../data/store';
 import { toggleTheme } from '../data/theme';
 import type { PaletteItem } from '../ui/command-palette';
-import { copySelection, cutSelection, pasteAt, duplicateSelection, copyAsOutline, copyAsMermaid } from '../data/clipboard';
+import { copySelection, cutSelection, pasteAt, duplicateSelection, copyAsOutline, copyAsMermaid, copyAsMarkdown, insertTemplate } from '../data/clipboard';
+import { TEMPLATES } from '../data/templates';
+import { $directoryOpen, $publishOpen, currentMarkdown, suggestedTitle } from '../data/directory';
+import { saveMarkdown } from '../data/exportImage';
 import { htmlToText } from '../data/textFormats';
 import type { LabelPos, LayoutMode, LinkEnds, LinkRoute } from '../data/types';
 import { copyAsPng, exportPng, exportSvg } from '../data/exportImage';
@@ -60,6 +63,7 @@ function copyItems(empty: boolean): MenuEntry[] {
         { id: 'copyPng', label: 'PNG image', shortcut: sc('mod+shift+e'), disabled: empty },
         { id: 'copyOutline', label: 'Outline (indented text)', disabled: empty },
         { id: 'copyMermaid', label: 'Mermaid', disabled: empty },
+        { id: 'copyMarkdown', label: 'Markdown (for LLMs and docs)', disabled: empty },
     ];
 }
 
@@ -108,6 +112,8 @@ function nodeMenu(): MenuEntry[] {
         { id: 'edit', label: 'Edit text', shortcut: sc('enter'), disabled: multi },
         { id: 'addChild', label: 'Add child', shortcut: sc('tab'), disabled: multi },
         { id: 'addSibling', label: 'Add sibling', disabled: multi },
+        { id: 'notes', label: 'Notes and links…', shortcut: sc('mod+i'), disabled: multi },
+        { id: 'copyNodeLink', label: 'Copy link to this node', disabled: multi },
         '-',
         { id: 'cut', label: 'Cut', shortcut: sc('mod+x') },
         { id: 'copy', label: 'Copy', shortcut: sc('mod+c') },
@@ -213,7 +219,9 @@ function canvasMenu(): MenuEntry[] {
         { id: 'copyAsMenu', label: 'Copy diagram as', items: copyItems(empty) },
         { id: 'exportPng', label: 'Export PNG', disabled: empty },
         { id: 'exportSvg', label: 'Export SVG', disabled: empty },
+        { id: 'exportMarkdown', label: 'Export Markdown', disabled: empty },
         '-',
+        { id: 'find', label: 'Find in this map', shortcut: sc('mod+f'), disabled: empty },
         { id: 'help', label: 'Keyboard shortcuts', shortcut: '?' },
     ];
 }
@@ -221,6 +229,7 @@ function canvasMenu(): MenuEntry[] {
 export function fileMenu(): MenuEntry[] {
     return [
         { id: 'new', label: 'New file' },
+        { id: 'templateMenu', label: 'New from template', items: TEMPLATES.map(t => ({ id: `template:${t.id}`, label: t.label })) },
         { id: 'open', label: 'Open…' },
         { id: 'save', label: 'Save to server', shortcut: sc('mod+s') },
         '-',
@@ -230,7 +239,12 @@ export function fileMenu(): MenuEntry[] {
         { id: 'copyAsMenu', label: 'Copy as', items: copyItems(false) },
         { id: 'exportPng', label: 'Export PNG' },
         { id: 'exportSvg', label: 'Export SVG' },
+        { id: 'exportMarkdown', label: 'Export Markdown' },
         '-',
+        { id: 'explore', label: 'Public maps…' },
+        { id: 'publish', label: 'Publish to public maps…' },
+        '-',
+        { id: 'find', label: 'Find in this map', shortcut: sc('mod+f') },
         { id: 'present', label: 'Present', shortcut: 'F5' },
         { id: 'theme', label: 'Dark / light theme' },
         { id: 'help', label: 'Keyboard shortcuts', shortcut: '?' },
@@ -396,6 +410,17 @@ const arrange: Record<string, () => void> = {
     mirrorY: () => mirror('y', 'height'),
 };
 
+// Starts from a template, asking first if there is a diagram to lose.
+export async function runTemplate(id: string): Promise<void> {
+    const template = TEMPLATES.find(t => t.id === id);
+    if (!template) return;
+    if ($nodes.get().length) {
+        await newFile();
+        if ($nodes.get().length) return;
+    }
+    await insertTemplate(template.text, template.layout);
+}
+
 export function runAction(id: string): void {
     $contextMenu.set(null);
     const [name, arg] = id.split(':');
@@ -430,6 +455,18 @@ export function runAction(id: string): void {
         case 'ungroup': ungroupSelection(); return;
         case 'frame': frameSelection(); return;
         case 'emoji': addEmoji(id.slice('emoji:'.length)); return;
+        case 'find': openFind(); return;
+        case 'notes': $notesOpen.set(true); return;
+        case 'copyNodeLink': {
+            const node = $nodes.get()[$selection.get()[0]];
+            if (node) void copyNodeLink(node.id);
+            return;
+        }
+        case 'explore': $directoryOpen.set(true); return;
+        case 'publish': $publishOpen.set(true); return;
+        case 'template': void runTemplate(arg); return;
+        case 'exportMarkdown': saveMarkdown(currentMarkdown(suggestedTitle()), suggestedTitle() || 'mindfoo'); return;
+        case 'copyMarkdown': copyAsMarkdown(); return;
         case 'copyOutline': copyAsOutline(); return;
         case 'copyMermaid': copyAsMermaid(); return;
         case 'frameRename': renameFrame(menuFrame); return;

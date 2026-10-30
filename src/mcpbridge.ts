@@ -11,6 +11,8 @@
 // (imported dynamically, e.g. via get_embed_snippet) for a real MCP client
 // to actually discover and call these; this file only sets up the page side
 // of the contract.
+import { findNodes } from './data/find';
+import { toMarkdown } from './data/textFormats';
 import {
 	$nodes as nodes,
 	$links as links,
@@ -31,6 +33,7 @@ import {
 	makeLines,
 	resize,
 	tick,
+	focusNode,
 } from './data/store';
 import { $theme as theme, toggleTheme } from './data/theme';
 import type { Link, Node, NodeId } from './data/types';
@@ -546,6 +549,30 @@ function hexToRgba(hex: string): { r: number; g: number; b: number; a: number } 
 }
 
 (window as any).__mcpTools = [
+	{
+		name: 'find_nodes',
+		description: 'Searches the WHOLE document (node text, notes, link labels, link targets) and returns the matches, ' +
+			'best first, as [{id, field, snippet}]. Quote words to match a phrase. Use this instead of get_document on a big map.',
+		params: { query: { type: 'string', description: 'Words to find, e.g. fuel "main pump"' } },
+		example: { query: 'fuel pump' },
+		fn: ({ query }: { query: string }) => JSON.stringify(findNodes(nodes.get(), links.get(), query).slice(0, 200)),
+	},
+	{
+		name: 'focus_node',
+		description: 'Moves the view to a node by id, opening any collapsed branch hiding it, and selects it. Use to show a person what you are talking about.',
+		params: { id: { type: 'string', description: 'The node\'s id' } },
+		example: { id: 'a1' },
+		fn: ({ id }: { id: string }) => {
+			if (!focusNode(id)) throw new Error(`no node with id "${id}"`);
+			return 'ok';
+		},
+	},
+	{
+		name: 'get_markdown',
+		description: 'Returns the whole document as Markdown: the tree as headings, notes as body text, other links as cross-links. The most compact way to read a big map.',
+		params: {},
+		fn: () => toMarkdown(nodes.get(), links.get()),
+	},
 	{
 		name: 'get_document',
 		description: `${MOCK_WORKFLOW_NOTE} Returns the WHOLE diagram as {"nodes":[...], "links":[...]} ` +

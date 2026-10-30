@@ -5,6 +5,10 @@ const icon = (body: ReturnType<typeof svg>) => svg`<svg width="16" height="16" v
     stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 
 export const icons = {
+    find: icon(svg`<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/>`),
+    globe: icon(svg`<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2.5 4 2.5 6S10 12 8 14c-2-2-2.5-4-2.5-6S6 4 8 2z"/>`),
+    notes: icon(svg`<path d="M3.5 2.5h9v11h-9z"/><path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"/>`),
+    back: icon(svg`<path d="M7 3.5 2.5 8 7 12.5"/><path d="M2.5 8h11"/>`),
     menu: icon(svg`<path d="M2.5 4h11M2.5 8h11M2.5 12h11"/>`),
     plus: icon(svg`<path d="M8 3v10M3 8h10"/>`),
     undo: icon(svg`<path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a3.5 3.5 0 0 1 0 7H7"/>`),
