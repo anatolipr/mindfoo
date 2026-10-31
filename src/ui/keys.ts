@@ -16,6 +16,18 @@ export function sc(combo: string): string {
     return [...parts.map(m => names[m]), label].join('+');
 }
 
+// True when a wheel event happens over the app's panels and dialogs or over
+// folderfoo's, so it must not move the scene behind them. The badges sit on
+// the canvas, so the scene still scrolls over those.
+export function wheelOverUi(path: EventTarget[]): boolean {
+    return path.some(target => {
+        const el = target as HTMLElement;
+        if (el.tagName?.startsWith('FOLDERFOO-')) return true;
+        if (!el.dataset || el.classList.contains('collapse-badge')) return false;
+        return el.dataset.ui !== undefined || el.dataset.scroll !== undefined;
+    });
+}
+
 // True when a key/clipboard event belongs to a text field the user is typing
 // in, so canvas shortcuts must leave it alone. Uses composedPath() because
 // the fields live inside the app's shadow root.

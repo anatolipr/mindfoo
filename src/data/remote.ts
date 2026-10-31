@@ -4,7 +4,7 @@ import { toast } from '../ui/toast';
 
 interface DocumentSlot {
     readonly currentName: string | undefined;
-    save(data: unknown): Promise<string>;
+    save(data: unknown, explicitName?: string): Promise<string>;
     load(name?: string): Promise<unknown>;
     saveSearchText(searchText: string, explicitName?: string): Promise<string>;
 }
@@ -174,11 +174,12 @@ window.addEventListener('hashchange', () => {
 // Best-effort and independent of the save itself: a failed/omitted index
 // post never affects the save, and the document stays findable by name
 // either way (see folderfoo's GET /files ?q= filename fallback).
+// name (optional): where to save; the #hash when omitted.
 // Resolves true when the document was saved, false when the save failed.
-export async function exportToServer(body: string, searchText?: string): Promise<boolean> {
+export async function exportToServer(body: string, searchText?: string, explicitName?: string): Promise<boolean> {
     const slot = await slotPromise;
     try {
-        const name = await slot.save(body);
+        const name = await slot.save(body, explicitName);
         toast(`Saved as ${name}`, 'success');
         if (searchText) {
             try {
@@ -193,6 +194,34 @@ export async function exportToServer(body: string, searchText?: string): Promise
         toast((e as Error).message, 'error');
         return false;
     }
+}
+
+// Whether a document is stored under name. Any failure other than not-found
+// (no network, a cancelled login) rejects: it says nothing about the name.
+export async function documentExists(name: string): Promise<boolean> {
+    const slot = await slotPromise;
+    try {
+        await slot.load(name);
+        return true;
+    } catch (e) {
+        if ((e as Error & { notFound?: boolean }).notFound) return false;
+        throw e;
+    }
+}
+
+// Shows folderfoo's file browser. Choosing a file fires "folderfoo-file-open",
+// which mind-foo-app.ts handles for this picker and the profile menu's alike.
+export async function showFilePicker(): Promise<void> {
+    await import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/folderfoo-file-open-modal.js`);
+    const { setTenantId } = await import(/* @vite-ignore */ `${FOLDERFOO_HOST}/elements/api-client.js`);
+    setTenantId(TENANT_ID);
+    let picker = document.querySelector('folderfoo-file-open-modal') as (HTMLElement & { show(): void }) | null;
+    if (!picker) {
+        picker = document.createElement('folderfoo-file-open-modal') as HTMLElement & { show(): void };
+        picker.setAttribute('app-name', 'MindFoo');
+        document.body.appendChild(picker);
+    }
+    picker.show();
 }
 
 // Propagates slot.load()'s not-found error as-is (Error with .notFound and

@@ -1,4 +1,5 @@
 import type { Frame, Node, NodeId } from './types';
+import { shapeBounds } from '../geo';
 
 // Shared by the canvas and the image export.
 
@@ -28,10 +29,11 @@ export function frameBoxes(frames: Frame[], nodes: Node[], hidden: Set<NodeId>):
     for (const frame of frames) {
         const members = frame.nodeIds.map(id => byId.get(id)).filter((n): n is Node => !!n && !hidden.has(n.id));
         if (!members.length) continue;
-        const x1 = Math.min(...members.map(n => n.x - n.width / 2)) - FRAME_PAD;
-        const y1 = Math.min(...members.map(n => n.y - n.height / 2)) - FRAME_PAD - FRAME_TITLE;
-        const x2 = Math.max(...members.map(n => n.x + n.width / 2)) + FRAME_PAD;
-        const y2 = Math.max(...members.map(n => n.y + n.height / 2)) + FRAME_PAD;
+        const sized = members.map(n => ({ n, ...shapeBounds(n) }));
+        const x1 = Math.min(...sized.map(({ n, w }) => n.x - w / 2)) - FRAME_PAD;
+        const y1 = Math.min(...sized.map(({ n, h }) => n.y - h / 2)) - FRAME_PAD - FRAME_TITLE;
+        const x2 = Math.max(...sized.map(({ n, w }) => n.x + w / 2)) + FRAME_PAD;
+        const y2 = Math.max(...sized.map(({ n, h }) => n.y + h / 2)) + FRAME_PAD;
         boxes.push({ frame, x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
     }
     return boxes;

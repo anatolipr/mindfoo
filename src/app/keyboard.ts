@@ -4,7 +4,7 @@ import {
     toggleEdit, startTypingEdit, move, add, deleteSelection,
     alignFirst, alignLast, center, equalSpacing, mirror, rotateNodeSize, rotateNodeType,
     rotateLineWidth, rotateLineDash, rotateArrows, lineText, lineDelete, toggleLinkArrow,
-    spaceDown, spaceUp, $presenting, $selectedStrokes, deleteSelectedStrokes, $tool, $layout, setTool, selectNeighbor, toggleCollapse,
+    spaceDown, spaceUp, $presenting, $selectedStrokes, deleteSelectedStrokes, $tool, selectionHasAutoLayout, setTool, selectNeighbor, toggleCollapse,
     openFind, $notesOpen, closeFind, $findOpen, groupSelection, ungroupSelection, startPresenting, stopPresenting, revealStep, revealAll, revealReset, zoomToFit,
 } from '../data/store';
 import { duplicateSelection } from '../data/clipboard';
@@ -139,7 +139,7 @@ export async function keydown(e: KeyboardEvent): Promise<void> {
         if ((key === 'Enter' || key === 'F2') && single) {
             e.preventDefault();
             toggleEdit($nodes.get()[selection[0]].id);
-        } else if (key.startsWith('Arrow') && $layout.get() !== 'free') {
+        } else if (key.startsWith('Arrow') && selectionHasAutoLayout()) {
             // auto layouts place nodes; arrows walk between them instead
             e.preventDefault();
             selectNeighbor(key.slice(5).toLowerCase() as 'left' | 'right' | 'up' | 'down');

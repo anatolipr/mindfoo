@@ -69,7 +69,7 @@ const DESCRIPTION_SECTIONS: DescriptionSection[] = [
 		blurb: 'What mindfoo is, tool choice (whole-document vs single-node/link), and gotcha overview.',
 		text:
 			'Context: mindfoo (aka "arrows") is a freeform visual mind-mapping / diagramming tool. A diagram ' +
-			'is "nodes" (shapes: roundrect/rect/circle/ellipse/rhombus/parallelogram, holding text/color/font ' +
+			'is "nodes" (shapes: roundrect/rect/circle/ellipse/rhombus/parallelogram/pill/hexagon/cylinder/note, holding text/color/font ' +
 			'size, positioned by an x/y CENTER point, not top-left) PLUS "links" (curved connector lines ' +
 			'between two node ids, each independently stylable as a plain line or an arrow). get_document/' +
 			'set_document read/write the WHOLE tree (nodes + links together) and are for structural changes - ' +
@@ -105,7 +105,7 @@ const DESCRIPTION_SECTIONS: DescriptionSection[] = [
 			'editing the node gets, "color": CSS color string or "" for theme ' +
 			'default, "text": inner HTML shown in the node (plain text is always safe), "size": one of ' +
 			'"15px"|"20px"|"25px"|"30px", "type": 0=roundrect, 1=rect, 2=circle, 3=ellipse, 4=rhombus, ' +
-			'5=parallelogram - use rotate_node_type on a selection to cycle these rather than hand-guessing ' +
+			'5=parallelogram, 6=text only, 7=pill, 8=hexagon, 9=cylinder, 10=note - use rotate_node_type on a selection to cycle these rather than hand-guessing ' +
 			'the int. ' +
 			'GOTCHA: node "x"/"y" are the CENTER, not top-left, and "width"/"height" are a read-only DOM-' +
 			'measurement cache - set_document ignores any "width"/"height" you pass and always starts new/' +
@@ -683,8 +683,8 @@ function hexToRgba(hex: string): { r: number; g: number; b: number; a: number } 
 	{
 		name: 'rotate_node_type',
 		description: `${MOCK_WORKFLOW_NOTE} Cycles every currently-selected node\'s shape "type" to the ` +
-			'next value in order [roundrect(0), rect(1), circle(2), ellipse(3), rhombus(4), parallelogram(5)], ' +
-			'wrapping back to roundrect after parallelogram - same as pressing Space with nodes selected in ' +
+			'next value in order [roundrect(0), rect(1), circle(2), ellipse(3), rhombus(4), parallelogram(5), pill(7), hexagon(8), cylinder(9), note(10), text only(6)], ' +
+			'wrapping back to roundrect after text only - same as pressing Space with nodes selected in ' +
 			'the UI. Call set_selection first. Prefer this over guessing/writing a raw "type" int via ' +
 			'set_document since it matches the exact cycle order the UI itself uses.',
 		params: {},

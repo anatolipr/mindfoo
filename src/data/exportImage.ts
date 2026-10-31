@@ -3,7 +3,7 @@ import { NodeType, LABEL_FRACTION } from './types';
 import { strokePath, frameBoxes } from './drawing';
 import { dashPattern } from './linkGeometry';
 import { determineArrow } from './directions';
-import { makeShape } from '../geo';
+import { makeShape, shapeBounds, shapeDetail } from '../geo';
 import { getContrastColor } from 'avos/src/color-util';
 import { toast } from '../ui/toast';
 
@@ -107,9 +107,11 @@ function buildSvg(): Built | null {
     }
 
     for (const node of nodes) {
-        grow(node.x - node.width / 2, node.y - node.height / 2, node.x + node.width / 2, node.y + node.height / 2);
+        const { w, h } = shapeBounds(node);
+        grow(node.x - w / 2, node.y - h / 2, node.x + w / 2, node.y + h / 2);
         if (node.type !== NodeType.text) {
             parts.push(`<path d="${esc(makeShape(node))}" fill="${esc(node.color || bg)}" stroke="${esc(fg)}" stroke-width="2"/>`);
+            if (shapeDetail(node)) parts.push(`<path d="${esc(shapeDetail(node))}" fill="none" stroke="${esc(fg)}" stroke-width="2"/>`);
         }
 
         const el = root.querySelector(`#d${CSS.escape(String(node.id))}`);

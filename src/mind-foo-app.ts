@@ -52,7 +52,8 @@ import {
     add,
     wheel,
     toggleEdit,
-    $layout as layout,
+    pressEditedNode,
+    currentLayout,
     $strokes as strokes,
     $frames as frames,
     $tool as tool,
@@ -119,10 +120,10 @@ import './ui/directory-panel';
 import { $toasts as toasts, toast } from './ui/toast';
 import { $dialog as dialog } from './ui/dialog';
 import { icons } from './ui/icons';
-import { isMac, isTypingTarget, sc } from './ui/keys';
+import { isMac, isTypingTarget, sc, wheelOverUi } from './ui/keys';
 import type { Line, Link, Node } from './data/types';
 import { determineArrow } from './data/directions';
-import { makeShape } from './geo';
+import { makeShape, shapeBounds, shapeDetail } from './geo';
 import { FOLDERFOO_HOST, TENANT_ID } from './server-config';
 import { publicToken, loadPublicLink, loadPublicFolderDocument, initialMap, initialExplore } from './data/remote';
 import { $directoryOpen, $publishOpen, cloneOpenListing, markdownUrl, openListing, reportOpenListing } from './data/directory';
@@ -168,14 +169,17 @@ const SHORTCUTS: [string, [string, string][]][] = [
         [`${sc('mod+z')} / ${sc('mod+shift+z')}`, 'Undo / redo'],
     ]],
     ['Layout', [
-        ['Toolbar layout button', 'Free, mind map, trees, radial; or arrange once in free mode'],
-        ['Drag a node (auto layouts)', 'Drop on a node to move the branch there, or between siblings to reorder'],
+        ['Toolbar layout button', 'Free, mind map, trees, radial, for the selected constellation or, with nothing selected, the whole map; or arrange once in free mode'],
+        ['Link two constellations', 'They become one and share one layout: an auto layout wins over free'],
+        ['Drag a node (auto layouts)', 'Drop on a node to move the branch there, or between siblings to reorder; drag a root to move the whole constellation'],
         ['Arrow keys (auto layouts), Alt+arrows', 'Move the selection to the next node'],
         [sc('mod+.'), 'Collapse or expand a branch'],
+        ['Drag while editing', 'A new node: drag it anywhere. After typing or clicking its text: drag its edge'],
         ['Drag (free layout)', 'Snaps to edges, centers and equal gaps; Alt: no snap; Shift: one axis'],
     ]],
     ['Select and move', [
         ['Click, Shift+click, drag a box', 'Select'],
+        ['Right-click a selection, Links', 'Connect, disconnect, reverse direction, arrows'],
         [sc('mod+a'), 'Select all'],
         [`${sc('mod+g')} / ${sc('mod+shift+g')}`, 'Group / ungroup'],
         ['Arrow keys', 'Nudge (Shift: 10 px)'],
@@ -403,8 +407,13 @@ export class MindFooApp extends LitElement {
     };
 
     private onWheel = (e: WheelEvent): void => {
-        // let panels with their own scroll (the shortcut list) scroll
-        if (e.composedPath().some(el => (el as HTMLElement).dataset?.scroll !== undefined)) return;
+        // the scene stays still behind a modal, and panels scroll themselves
+        if (dialog.get() || help.get() || palette.get() || contextMenu.get() || $directoryOpen.get() || $publishOpen.get()
+            || wheelOverUi(e.composedPath())) {
+            // Cmd/Ctrl+wheel would zoom the browser page instead
+            if (e.ctrlKey || e.metaKey) e.preventDefault();
+            return;
+        }
         e.preventDefault();
         e.stopPropagation();
         wheel(e);
@@ -754,6 +763,14 @@ export class MindFooApp extends LitElement {
             text-align: center;
         }
 
+        .item.edited {
+            cursor: move;
+        }
+
+        .item.edited [contenteditable] {
+            cursor: text;
+        }
+
         .resize-handle {
             position: absolute;
             top: 0;
@@ -1040,8 +1057,10 @@ export class MindFooApp extends LitElement {
         const viewLeft = -sceneValue.x / zoomValue - margin, viewTop = -sceneValue.y / zoomValue - margin;
         const viewRight = (window.innerWidth - sceneValue.x) / zoomValue + margin;
         const viewBottom = (window.innerHeight - sceneValue.y) / zoomValue + margin;
-        const inView = (n: Node) => n.x + n.width / 2 >= viewLeft && n.x - n.width / 2 <= viewRight
-            && n.y + n.height / 2 >= viewTop && n.y - n.height / 2 <= viewBottom;
+        const inView = (n: Node) => {
+            const { w, h } = shapeBounds(n);
+            return n.x + w / 2 >= viewLeft && n.x - w / 2 <= viewRight && n.y + h / 2 >= viewTop && n.y - h / 2 <= viewBottom;
+        };
         const culled = (n: Node, i: number) => big && !inView(n) && selectionValue.indexOf(i) === -1;
         const lineCulled = (link: Link | undefined, i: number) => {
             if (!big || !link || i === selectedLinkValue) return false;
@@ -1149,7 +1168,7 @@ export class MindFooApp extends LitElement {
                             class="${classMap({ shp: true, selected: selectionValue.indexOf(i) > -1, textNode: node.type === NodeType.text })}"
                             opacity=${dim(node.id) ? 0.2 : 1}
                             pointer-events="visiblePainted"
-                            @mousedown=${(e: MouseEvent) => { e.stopPropagation(); selectNode(i, e); }}
+                            @mousedown=${(e: MouseEvent) => { e.stopPropagation(); if (!pressEditedNode(i, e)) selectNode(i, e); }}
                             @contextmenu=${(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); openNodeMenu(e); }}
                             @dblclick=${(e: MouseEvent) => { e.stopPropagation(); toggleEdit(node.id); }}
                             fill=${node.type === NodeType.text ? 'transparent' : node.color ? node.color : 'var(--bg-1)'}
@@ -1157,6 +1176,8 @@ export class MindFooApp extends LitElement {
                             stroke-width="2"
                             d=${makeShape(node)}
                         />
+                        ${shapeDetail(node) ? svg`<path d=${shapeDetail(node)} fill="none" stroke="var(--fg-2)" stroke-width="2"
+                            pointer-events="none" opacity=${dim(node.id) ? 0.2 : 1} />` : nothing}
                     `)}
 
                     ${dragFrom && dragTo ? svg`
@@ -1219,7 +1240,7 @@ export class MindFooApp extends LitElement {
 
                 ${handleNode ? html`
                     <div class="link-handle" title="Drag to link to a node, or drop on empty space to add a linked node"
-                        style="left:${handleNode.x + handleNode.width / 2 + 10}px; top:${handleNode.y}px;"
+                        style="left:${handleNode.x + shapeBounds(handleNode).w / 2 + 10}px; top:${handleNode.y}px;"
                         @mousedown=${(e: MouseEvent) => startLinkDrag(selectionValue[0], e)}
                         @dblclick=${(e: MouseEvent) => e.stopPropagation()}
                         @contextmenu=${(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); }}
@@ -1313,12 +1334,12 @@ export class MindFooApp extends LitElement {
                 <button class="wide" title="Zoom in (${sc('mod+=')})" @click=${zoomIn}>${icons.zoomIn}</button>
                 <button title="Zoom to fit" @click=${zoomToFit}>${icons.fit}</button>
                 <span class="sep"></span>
-                <button title="Layout" @click=${(e: MouseEvent) => openLayoutMenu(e.currentTarget as HTMLElement)}>
-                    ${icons.layout}<span class="wide">${LAYOUTS.find(([id]) => id === layout.get())?.[1]} ▾</span>
+                <button title=${selection.get().length ? 'Layout of the selected constellation' : 'Layout of the whole map'} @click=${(e: MouseEvent) => openLayoutMenu(e.currentTarget as HTMLElement)}>
+                    ${icons.layout}<span class="wide">${currentLayout() === 'mixed' ? 'Mixed' : LAYOUTS.find(([id]) => id === currentLayout())?.[1]} ▾</span>
                 </button>
                 <span class="sep"></span>
                 ${([['select', icons.pointer, 'Select and move (Esc)'], ['pen', icons.pen, 'Pen'],
-                    ['highlighter', icons.highlighter, 'Highlighter'], ['eraser', icons.eraser, 'Eraser: drag over ink']] as [Tool, unknown, string][])
+                    ['highlighter', icons.highlighter, 'Highlighter'], ['eraser', icons.eraser, 'Eraser: removes pen and highlighter ink only']] as [Tool, unknown, string][])
                     .map(([id, icon, title]) => html`
                         <button class="${tool.get() === id ? 'active' : ''} ${id === 'highlighter' ? 'wide' : ''}" title=${title} @click=${() => setTool(id)}>${icon}</button>
                     `)}
@@ -1474,7 +1495,7 @@ export class MindFooApp extends LitElement {
         const value = spacing.get();
         const left = Math.max(4, Math.min(at.x, window.innerWidth - 256));
         const top = Math.max(4, Math.min(at.y, window.innerHeight - 220));
-        const free = layout.get() === 'free';
+        const free = currentLayout() === 'free';
         const slider = (label: string, key: 'level' | 'sibling', min: number, max: number) => html`
             <label class="slider">
                 <span>${label}<b>${Math.round(value[key])} px</b></span>
@@ -1486,7 +1507,7 @@ export class MindFooApp extends LitElement {
             <div class="popover spacing" data-ui style="left:${left}px; top:${top}px;"
                 @mousedown=${(e: MouseEvent) => e.stopPropagation()}
                 @dblclick=${(e: MouseEvent) => e.stopPropagation()}>
-                ${slider(layout.get() === 'down' ? 'Distance between levels' : 'Distance to children', 'level', 10, 300)}
+                ${slider(currentLayout() === 'down' ? 'Distance between levels' : 'Distance to children', 'level', 10, 300)}
                 ${slider('Space between siblings', 'sibling', 0, 150)}
                 <p class="note">${free ? 'Free layout: used by Arrange once.' : 'Applies to this document.'}</p>
                 <button class="clear" @click=${() => setSpacing({ ...DEFAULT_SPACING })}>Reset to default</button>
@@ -1589,7 +1610,7 @@ export class MindFooApp extends LitElement {
             return html`
                 <button class="collapse-badge" data-ui
                     title=${collapsed ? 'Expand branch' : 'Collapse branch'}
-                    style="left:${node.x}px; top:${node.y + node.height / 2 + 3}px;"
+                    style="left:${node.x}px; top:${node.y + shapeBounds(node).h / 2 + 3}px;"
                     @mousedown=${(e: MouseEvent) => e.stopPropagation()}
                     @dblclick=${(e: MouseEvent) => e.stopPropagation()}
                     @click=${() => toggleCollapse(i)}>${collapsed ? `+${hiddenCount(node.id)}` : '−'}</button>
@@ -1630,10 +1651,10 @@ export class MindFooApp extends LitElement {
 
         return html`
             <div id="d${node.id}"
-                class="item"
+                class="item ${editingValue && selectionValue.length === 1 && selectionValue[0] === i ? 'edited' : ''}"
                 tabindex="-1"
                 role="button"
-                @mousedown=${(e: MouseEvent) => e.stopPropagation()}
+                @mousedown=${(e: MouseEvent) => { e.stopPropagation(); pressEditedNode(i, e); }}
                 @dblclick=${(e: MouseEvent) => e.stopPropagation()}
                 @contextmenu=${(e: MouseEvent) => e.stopPropagation()}
                 style=${style}

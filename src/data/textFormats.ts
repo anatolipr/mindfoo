@@ -122,11 +122,11 @@ export function parseMarkdown(text: string): Parsed | null {
 
 // Opening token, closing token, shape. Longest openers first.
 const SHAPES: [string, string, NodeType][] = [
-    ['(((', ')))', NodeType.circle], ['((', '))', NodeType.circle], ['([', '])', NodeType.ellipse],
-    ['[[', ']]', NodeType.rect], ['[(', ')]', NodeType.rect], ['{{', '}}', NodeType.rhombus],
+    ['(((', ')))', NodeType.circle], ['((', '))', NodeType.circle], ['([', '])', NodeType.pill],
+    ['[[', ']]', NodeType.rect], ['[(', ')]', NodeType.cylinder], ['{{', '}}', NodeType.hexagon],
     ['[/', '/]', NodeType.parallelogram], ['[\\', '\\]', NodeType.parallelogram], ['[/', '\\]', NodeType.parallelogram],
     ['[\\', '/]', NodeType.parallelogram], ['{', '}', NodeType.rhombus], ['(', ')', NodeType.roundrect],
-    ['[', ']', NodeType.rect], ['>', ']', NodeType.rect],
+    ['[', ']', NodeType.rect], ['>', ']', NodeType.note],
 ];
 
 function cleanLabel(raw: string): string {
@@ -339,7 +339,8 @@ export function toMarkdown(nodes: Node[], links: Link[], options: { title?: stri
 const MERMAID_SHAPE: Record<number, [string, string]> = {
     [NodeType.roundrect]: ['(', ')'], [NodeType.rect]: ['[', ']'], [NodeType.circle]: ['((', '))'],
     [NodeType.ellipse]: ['([', '])'], [NodeType.rhombus]: ['{', '}'], [NodeType.parallelogram]: ['[/', '/]'],
-    [NodeType.text]: ['[', ']'],
+    [NodeType.text]: ['[', ']'], [NodeType.pill]: ['([', '])'], [NodeType.hexagon]: ['{{', '}}'],
+    [NodeType.cylinder]: ['[(', ')]'], [NodeType.note]: ['>', ']'],
 };
 
 export function toMermaid(nodes: Node[], links: Link[], layout: LayoutMode): string {

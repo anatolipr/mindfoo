@@ -121,3 +121,14 @@ test('outline import handles far more than a few hundred rows', () => {
     const rows = Array.from({ length: 5000 }, (_, i) => `row ${i}`).join('\n');
     expect(parseOutline(rows).nodes.length).toBe(5000);
 });
+
+test('Mermaid keeps pills, hexagons, cylinders and notes in both directions', () => {
+    const p = parseMermaid('flowchart LR\n a([Pill]) --> b{{Hex}}\n b --> c[(Db)]\n c --> d>Flag]')!
+    const type = (text: string) => p.nodes.find(n => n.text === text)!.type
+    expect([type('Pill'), type('Hex'), type('Db'), type('Flag')]).toEqual([NodeType.pill, NodeType.hexagon, NodeType.cylinder, NodeType.note])
+    const out = toMermaid(p.nodes, p.links, 'right')
+    expect(out).toContain('(["Pill"])')
+    expect(out).toContain('{{"Hex"}}')
+    expect(out).toContain('[("Db")]')
+    expect(out).toContain('>"Flag"]')
+})

@@ -3,7 +3,7 @@ import {
     $links, $nodes, $origin, $frames, $preview, clonePreview, doExportToServer,
     loadSharedDocument, openListingHook,
 } from './store';
-import { $serverName, authGuard, type DirectoryListing, type DirectoryPage, type DirectoryQuery } from './remote';
+import { $serverName, authGuard, documentExists, type DirectoryListing, type DirectoryPage, type DirectoryQuery } from './remote';
 import { toMarkdown } from './textFormats';
 import { plainText } from './find';
 import { toast } from '../ui/toast';
@@ -79,14 +79,23 @@ export function suggestedTitle(): string {
 
 export type PublishResult = { ok: true; id: string; status: string; version: number } | { ok: false; error: string; reasons: string[] };
 
+// A name for a map published before it was ever saved: its title, safe as a
+// file name, numbered if taken.
+async function freeDocumentName(title: string): Promise<string> {
+    const base = title.replace(/[^\p{L}\p{N} _-]+/gu, ' ').replace(/\s+/g, ' ').trim() || 'Untitled map';
+    let name = base;
+    for (let n = 2; await documentExists(name); n++) name = `${base} ${n}`;
+    return name;
+}
+
 // Saves first, so what gets published is what is on screen: the server publishes
-// the stored file, so what it screens is exactly what it lists.
+// the stored file, so what it screens is exactly what it lists. A map with no
+// name yet gets one from its title.
 export async function publishCurrent(form: { title: string; description: string; tags: string[]; license: string }): Promise<PublishResult> {
-    const name = $serverName.get();
-    if (!name) return { ok: false, error: 'Save this map first, then publish it.', reasons: [] };
     const guard = await authGuard();
-    if (!await doExportToServer()) return { ok: false, error: 'Could not save this map, so it was not published.', reasons: [] };
     try {
+        const name = $serverName.get() ?? await freeDocumentName(form.title);
+        if (!await doExportToServer(name)) return { ok: false, error: 'Could not save this map, so it was not published.', reasons: [] };
         const origin = $origin.get();
         const result = await guard.publishToDirectory({
             name, ...form,

@@ -5,8 +5,9 @@ import {
     setNodeType, setNodeSize, setLinkDirection, setLinkDash, setLinkWidth,
     alignFirst, alignLast, center, equalSpacing, mirror,
     zoomToFit, zoomReset, newFile, doExportToServer, doImportFromServer, doImport, doExport,
-    toScene, undo, redo, $layout, $snapEnabled, $strokes, $frames,
+    toScene, undo, redo, currentLayout, selectionHasAutoLayout, $snapEnabled, $strokes, $frames,
     setLayout, arrangeOnce, setSnapEnabled, startPresenting, clearInk, toggleCollapse, hasChildren,
+    canConnect, connectionHub, connectSelection, disconnectSelection, reverseSelectedLink, reverseSelectionLinks, selectionLinkCount, selectionTargetLinks, setSelectionArrows,
     groupSelection, ungroupSelection, frameSelection, renameFrame, setFrameColor, removeFrame, addEmoji,
     zoomIn, zoomOut, setTool, $tool, type Tool,
     $selectedStrokes, deleteSelectedStrokes, setStrokeWidth,
@@ -46,15 +47,21 @@ let menuAt = { x: 0, y: 0 };
 // The frame a frame menu was opened on.
 let menuFrame = '';
 
+function linkEndsMenu(): MenuEntry {
+    return { id: 'linkEndsMenu', label: 'Link ends (whole map)', items: ENDS.map(([ends, label]) =>
+        ({ id: `linkEnds:${ends}`, label, checked: $linkEnds.get() === ends })) };
+}
+
 function layoutItems(): MenuEntry[] {
-    const mode = $layout.get();
+    const mode = currentLayout();
     const empty = $nodes.get().length === 0;
     return [
         ...LAYOUTS.map(([id, label]) => ({ id: `layout:${id}`, label, checked: mode === id })),
         '-',
-        { id: 'arrangeMenu', label: 'Arrange once', disabled: mode !== 'free' || empty, items: LAYOUTS.slice(1).map(([id, label]) =>
+        { id: 'arrangeMenu', label: 'Arrange once', disabled: (mode !== 'free' && mode !== 'mixed') || empty, items: LAYOUTS.slice(1).map(([id, label]) =>
             ({ id: `arrange:${id}`, label })) },
         { id: 'spacing', label: 'Spacing…' },
+        linkEndsMenu(),
     ];
 }
 
@@ -75,6 +82,7 @@ function short(html: string | undefined): string {
 const SHAPES: [NodeType, string][] = [
     [NodeType.roundrect, 'Rounded rectangle'], [NodeType.rect, 'Rectangle'], [NodeType.circle, 'Circle'],
     [NodeType.ellipse, 'Ellipse'], [NodeType.rhombus, 'Diamond'], [NodeType.parallelogram, 'Parallelogram'],
+    [NodeType.pill, 'Pill'], [NodeType.hexagon, 'Hexagon'], [NodeType.cylinder, 'Cylinder (database)'], [NodeType.note, 'Note'],
     [NodeType.text, 'Text only'],
 ];
 const LABEL_SIZES: [string, string][] = [['12px', 'Small'], ['15px', 'Normal'], ['20px', 'Large'], ['26px', 'Extra large']];
@@ -103,6 +111,30 @@ const FRAME_COLORS: [string, string][] = [
 const SIZES: [NodeFontSize, string][] = [['15px', 'Small'], ['20px', 'Medium'], ['25px', 'Large'], ['30px', 'Extra large']];
 const WIDTHS: [Width, string][] = [[2, 'Thin'], [4, 'Medium'], [6, 'Thick']];
 
+function nodeLinksMenu(): MenuEntry[] {
+    const count = $selection.get().length;
+    const multi = count > 1;
+    const targets = selectionTargetLinks();
+    const many = targets.length > 1 ? ` (${targets.length} links)` : '';
+    const arrows: [Direction, string][] = [['none', 'No arrows'], ['right', 'Arrow forward'], ['left', 'Arrow backward'], ['both', 'Arrows at both ends']];
+    return [
+        ...(multi ? [
+            { id: 'connect:chain', label: count === 2 ? 'Connect' : 'Connect in a chain', disabled: !canConnect('chain') },
+            ...(count > 2 ? [{ id: 'connect:hub', label: `Connect all to “${short(connectionHub()?.text)}”`, disabled: !canConnect('hub') }] : []),
+        ] : [{ id: 'tapLink', label: 'Connect to another node…' }]),
+        '-',
+        ...(multi ? [
+            { id: 'disconnect:within', label: 'Disconnect from each other', disabled: !selectionLinkCount('within') },
+            { id: 'disconnect:leaving', label: 'Disconnect from the rest', disabled: !selectionLinkCount('leaving') },
+        ] : []),
+        { id: 'disconnect:touching', label: 'Remove all links', disabled: !selectionLinkCount('touching') },
+        '-',
+        { id: 'reverseLinks', label: `Reverse direction${many}`, disabled: !targets.length },
+        { id: 'nodeArrowsMenu', label: `Arrows${many}`, disabled: !targets.length, items: arrows.map(([direction, label]) =>
+            ({ id: `nodeArrows:${direction}`, label, checked: targets.length > 0 && targets.every(link => link.direction === direction) })) },
+    ];
+}
+
 function nodeMenu(): MenuEntry[] {
     const selection = $selection.get();
     const count = selection.length;
@@ -126,6 +158,7 @@ function nodeMenu(): MenuEntry[] {
         { id: 'sizeMenu', label: 'Text size', items: SIZES.map(([size, label]) =>
             ({ id: `size:${size}`, label, checked: (first?.size ?? '15px') === size })) },
         { id: 'color', label: 'Color…' },
+        { id: 'linksMenu', label: 'Links', items: nodeLinksMenu() },
         { id: 'emojiMenu', label: 'Add emoji', items: EMOJI.map(([emoji, label]) => ({ id: `emoji:${emoji}`, label: `${emoji}  ${label}` })) },
         '-',
         { id: 'collapse', label: first?.collapsed ? 'Expand branch' : 'Collapse branch', shortcut: sc('mod+.'),
@@ -134,7 +167,7 @@ function nodeMenu(): MenuEntry[] {
         { id: 'ungroup', label: 'Ungroup', shortcut: sc('mod+shift+g'), disabled: !selection.some(i => $nodes.get()[i]?.groupId) },
         { id: 'frame', label: 'Frame selection…' },
         '-',
-        { id: 'arrangeMenu', label: 'Arrange', disabled: $layout.get() !== 'free', items: [
+        { id: 'arrangeMenu', label: 'Arrange', disabled: selectionHasAutoLayout(), items: [
             { id: 'alignL', label: 'Align left', shortcut: 'L', disabled: !multi },
             { id: 'alignCX', label: 'Align centers horizontally', shortcut: 'C', disabled: !multi },
             { id: 'alignR', label: 'Align right', shortcut: 'R', disabled: !multi },
@@ -148,6 +181,7 @@ function nodeMenu(): MenuEntry[] {
             { id: 'mirrorX', label: 'Mirror positions horizontally', shortcut: 'M', disabled: !multi },
             { id: 'mirrorY', label: 'Mirror positions vertically', shortcut: sc('shift+m'), disabled: !multi },
         ] },
+        { id: 'layoutMenu', label: 'Layout', items: layoutItems() },
         '-',
         { id: 'copyAsMenu', label: 'Copy as', items: copyItems(false) },
     ];
@@ -177,6 +211,7 @@ function lineMenu(): MenuEntry[] {
         ] },
         { id: 'arrowsMenu', label: 'Arrows', items: DIRECTIONS.map(([direction, label]) =>
             ({ id: `dir:${direction}`, label, checked: link?.direction === direction })) },
+        { id: 'reverseLink', label: 'Reverse direction' },
         { id: 'routeMenu', label: 'Route', items: [
             ...ROUTES.map(([route, label]) => ({ id: `route:${route}`, label, checked: link?.route === route })),
             '-',
@@ -208,8 +243,7 @@ function canvasMenu(): MenuEntry[] {
         { id: 'snap', label: 'Snap to guides', checked: $snapEnabled.get() },
         { id: 'linkRouteMenu', label: 'Link route', items: ROUTES.map(([route, label]) =>
             ({ id: `defaultRoute:${route}`, label, checked: $linkRoute.get() === route })) },
-        { id: 'linkEndsMenu', label: 'Link ends', items: ENDS.map(([ends, label]) =>
-            ({ id: `linkEnds:${ends}`, label, checked: $linkEnds.get() === ends })) },
+        linkEndsMenu(),
         { id: 'fit', label: 'Zoom to fit', disabled: empty },
         { id: 'zoomReset', label: 'Reset zoom', shortcut: sc('mod+0') },
         '-',
@@ -498,7 +532,12 @@ export function runAction(id: string): void {
         case 'dashStyle': setLinkDash((arg ?? '') as Dash); return;
         case 'flow': toggleLinkFlow(); return;
         case 'addSibling': addSibling(); return;
-        case 'tapLink': startTapLink(); toast('Tap the node to link to', 'info'); return;
+        case 'tapLink': startTapLink(); toast('Click or tap the node to link to', 'info'); return;
+        case 'connect': connectSelection(arg as 'chain' | 'hub'); return;
+        case 'disconnect': disconnectSelection(arg as 'within' | 'leaving' | 'touching'); return;
+        case 'reverseLinks': reverseSelectionLinks(); return;
+        case 'nodeArrows': setSelectionArrows(arg as Direction); return;
+        case 'reverseLink': reverseSelectedLink(); return;
         case 'dash': {
             const link = $links.get()[$selectedLink.get()];
             setLinkDash(link?.dash ? '' : '4');

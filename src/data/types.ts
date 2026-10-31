@@ -11,7 +11,10 @@ export enum NodeType {
     rhombus, 
     parallelogram,
     // no outline: free text on the canvas
-    text
+    text,
+    // saved in documents by number: new shapes go at the end
+    pill, hexagon,
+    cylinder, note
 }
 
 export type NodeFontSize = '15px' | '20px' | '25px' | '30px';
@@ -37,7 +40,9 @@ export type Node = {
     // long-form detail, plain text or Markdown; the node itself stays short
     notes?: string,
     // where this node points: a page, a node, or another map (see refs.ts)
-    ref?: string
+    ref?: string,
+    // auto layout of this node's constellation; unset = free
+    layout?: Exclude<LayoutMode, 'free'>
 } & {[key: string]: any}
 
 // 'free': positions are the user's. Every other mode computes positions

@@ -1,9 +1,12 @@
 import type { LayoutMode, Link, Node, NodeId } from './types';
+import { shapeBounds } from '../geo';
 
 // Automatic positions computed from the link tree (link.one is the parent
 // of link.two). Pure: takes nodes with measured width/height, returns new
 // centers. The first root keeps its current position, so the map does not
 // jump when a mode is switched on or a node is added.
+
+export const AUTO_LAYOUTS: unknown[] = ['mindmap', 'right', 'down', 'radial', 'timeline'];
 
 export type Pos = { x: number; y: number };
 
@@ -56,6 +59,46 @@ export function buildTree(nodes: Node[], links: Link[], hidden: Set<NodeId> = ne
     for (const id of ids) if (!indegree.get(id) && !visited.has(id)) grow(id);
     for (const id of ids) if (!visited.has(id)) grow(id);
     return tree;
+}
+
+// Groups of nodes connected by links in either direction, each in document
+// order. A node without links is a group of its own.
+export function constellations(nodes: Node[], links: Link[]): Node[][] {
+    const leader = new Map<NodeId, NodeId>(nodes.map(n => [n.id, n.id]));
+    const find = (id: NodeId): NodeId => {
+        let top = id;
+        while (leader.get(top) !== top) top = leader.get(top)!;
+        while (leader.get(id) !== top) {
+            const next = leader.get(id)!;
+            leader.set(id, top);
+            id = next;
+        }
+        return top;
+    };
+    for (const link of links) {
+        if (leader.has(link.one) && leader.has(link.two)) leader.set(find(link.one), find(link.two));
+    }
+    const groups = new Map<NodeId, Node[]>();
+    for (const node of nodes) {
+        const top = find(node.id);
+        if (groups.has(top)) groups.get(top)!.push(node);
+        else groups.set(top, [node]);
+    }
+    return [...groups.values()];
+}
+
+// The mode of a constellation whose members may disagree, right after a link
+// joined two of them: a root's auto mode wins, so a parent's mode reaches what
+// was linked under it, then any member's. A link alone never makes an auto
+// layout free.
+export function constellationMode(group: Node[], links: Link[]): LayoutMode {
+    if (group.every(n => !n.layout)) return 'free';
+    const byId = new Map(group.map(n => [n.id, n]));
+    for (const root of buildTree(group, links).roots) {
+        const mode = byId.get(root)!.layout;
+        if (mode) return mode;
+    }
+    return group.find(n => n.layout)!.layout!;
 }
 
 // Depth-first order of a tree: the presenter's reveal order.
@@ -203,7 +246,7 @@ export function computeLayout(
     const treeGap = Math.max(40, sp.level + 10);
     const tree = buildTree(nodes, links, opts.hidden);
     const byId = new Map(nodes.map(n => [n.id, n]));
-    const sizes: Sized = new Map(nodes.map(n => [n.id, { w: n.width || 140, h: n.height || 40 }]));
+    const sizes: Sized = new Map(nodes.map(n => [n.id, shapeBounds({ ...n, width: n.width || 140, height: n.height || 40 })]));
     const result = new Map<NodeId, Pos>();
     let cursor: Pos | null = null;  // where the next tree's bounding box starts
     const stackDown = mode !== 'down' && mode !== 'radial';

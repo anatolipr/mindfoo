@@ -6,7 +6,7 @@ import {
     searchDirectory, suggestedTitle, unpublishListing,
 } from '../data/directory';
 import { $origin } from '../data/store';
-import { $serverName, type DirectoryListing, type DirectoryPage } from '../data/remote';
+import { type DirectoryListing, type DirectoryPage } from '../data/remote';
 import { toast } from './toast';
 
 const PAGE = 24;
@@ -223,7 +223,6 @@ export class PublishDialog extends LitElement {
 
     render() {
         const stop = (e: Event) => e.stopPropagation();
-        const saved = !!$serverName.get();
         const origin = $origin.get();
         return html`
             <div class="panel" data-ui role="dialog" aria-label="Publish to public maps"
@@ -242,7 +241,6 @@ export class PublishDialog extends LitElement {
                     </div>
                 </form>` : html`<form @submit=${this.submit}>
                     <p class="hint">Anyone can open and clone this, including children, so keep it suitable for all ages. It is a snapshot: your later edits stay private until you publish again.</p>
-                    ${saved ? nothing : html`<p class="error">Save this map first. Publishing uses the saved copy.</p>`}
                     ${origin ? html`<p class="hint">Credits "${origin.title}" by ${origin.owner}, which this was cloned from.</p>` : nothing}
                     <label>Title
                         <input required maxlength="120" .value=${this.listingTitle} @input=${(e: Event) => { this.listingTitle = (e.target as HTMLInputElement).value; }} />
@@ -263,7 +261,7 @@ export class PublishDialog extends LitElement {
                     ${this.error ? html`<div class="error">${this.error}${this.reasons.length ? html`<ul>${this.reasons.map(r => html`<li>${r}</li>`)}</ul>` : nothing}</div>` : nothing}
                     <div class="buttons">
                         <button type="button" @click=${this.close}>Cancel</button>
-                        <button type="submit" class="primary" ?disabled=${this.busy || !saved || !this.listingTitle.trim()}>${this.busy ? 'Publishing…' : 'Publish'}</button>
+                        <button type="submit" class="primary" ?disabled=${this.busy || !this.listingTitle.trim()}>${this.busy ? 'Publishing…' : 'Publish'}</button>
                     </div>
                 </form>`}
             </div>

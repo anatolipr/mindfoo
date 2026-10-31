@@ -1,10 +1,10 @@
 import { nanoid } from 'nanoid';
 import {
-    $nodes, $links, $selection, $selectedLink, $editing, $mouse, $layout, $spacing,
-    $frames, snapshot, makeNodesMap, makeLines, tick, resize, toScene, deleteSelection, setLayout, zoomToFit,
+    $nodes, $links, $selection, $selectedLink, $editing, $mouse, $spacing,
+    $frames, snapshot, makeNodesMap, makeLines, tick, resize, toScene, deleteSelection, setLayout, layoutOf, zoomToFit,
 } from './store';
 import { DASHES, DEFAULT_DASH, DEFAULT_NODE_FONT_SIZE, DEFAULT_NODE_TYPE, DEFAULT_WIDTH, LINK_ROUTES, UNSELECTED, type LayoutMode, type Link, type Node } from './types';
-import { computeLayout } from './layout';
+import { AUTO_LAYOUTS, computeLayout } from './layout';
 import { blankNode, parseMarkdown, parseMermaid, parseOutline, toMarkdown, toMermaid, toOutline } from './textFormats';
 import { sanitizeHtml } from '../util';
 import { isTypingTarget } from '../ui/keys';
@@ -57,6 +57,7 @@ function parseClip(json: string): Clip | null {
                 maxWidth: typeof n.maxWidth === 'number' ? n.maxWidth : 300,
                 color: typeof n.color === 'string' ? n.color : '',
                 size: typeof n.size === 'string' ? n.size : DEFAULT_NODE_FONT_SIZE,
+                ...(AUTO_LAYOUTS.includes(n.layout) ? { layout: n.layout } : {}),
                 type: typeof n.type === 'number' ? n.type : DEFAULT_NODE_TYPE,
                 ...(typeof n.notes === 'string' ? { notes: n.notes } : {}),
                 ...(typeof n.ref === 'string' ? { ref: n.ref } : {}),
@@ -85,8 +86,8 @@ function parseClip(json: string): Clip | null {
 
 // Inserts a copy of clip with fresh ids, centered on `at` (scene coords) or
 // shifted by `offset`; roots get linked from `attachTo` when given.
-// arrange: lay the inserted nodes out as a tree (free mode only; auto
-// modes lay out the whole diagram anyway).
+// arrange: lay the inserted nodes out as a tree (a constellation they join
+// with an auto mode lays them out again anyway).
 async function insertClip(clip: Clip, at: { x: number; y: number } | null, offset = 0, attachTo?: Node['id'],
                           arrange?: Exclude<LayoutMode, 'free'>): Promise<void> {
     // a loop, not Math.min(...xs): a big paste would overflow the call stack
@@ -126,7 +127,7 @@ async function insertClip(clip: Clip, at: { x: number; y: number } | null, offse
 
     await tick();
     for (let i = start; i < start + nodes.length; i++) resize(i);
-    if (arrange && $layout.get() === 'free') {
+    if (arrange) {
         const inserted = $nodes.get().slice(start);
         const insertedIds = new Set(inserted.map(n => n.id));
         const own = links.filter(l => insertedIds.has(l.one) && insertedIds.has(l.two));
@@ -269,5 +270,6 @@ export async function insertTemplate(text: string, layout: Exclude<LayoutMode, '
 
 export function copyAsMermaid(): Promise<void> {
     const clip = scope();
-    return writeText(toMermaid(clip.nodes, clip.links, $layout.get()), 'Mermaid');
+    const modes = new Set(clip.nodes.map(layoutOf));
+    return writeText(toMermaid(clip.nodes, clip.links, modes.size === 1 ? [...modes][0] : 'free'), 'Mermaid');
 }

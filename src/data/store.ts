@@ -6,21 +6,22 @@ import { type Line, type Link, type Coordinates,
 import { nanoid } from 'nanoid';
 import { lineCurveFactor } from './consts';
 import intersect from "path-intersection"
-import { deCasteljau, makeCurve, makeShape } from '../geo';
+import { deCasteljau, makeCurve, makeShape, pointInShape, shapeBounds, shapeReach } from '../geo';
 import { determineNextDirection, toggleArrows, type Direction } from './directions';
 import { NodeType, type NodeFontSize, type Dash, type Width, type LayoutMode, type Stroke, type Frame, type LinkRoute, type LinkEnds, LINK_ENDS, LINK_ROUTES } from './types';
 import { elbowPoints, cornerPoint, roundedPolyline, cubicPoint, normalOf, bendFromPoint, polylinePoint, seededRandom, jitterCubic, type Pt } from './linkGeometry';
 import { LABEL_FRACTION, type LabelPos } from './types';
-import { buildTree, computeLayout, preorder, DEFAULT_SPACING, type Spacing } from './layout';
+import { AUTO_LAYOUTS, buildTree, computeLayout, constellationMode, constellations, preorder, DEFAULT_SPACING, type Spacing } from './layout';
 import { snapMove, unionBox, type Box, type GuideLine } from './snap';
 import { readFile, saveFile } from 'avos/src/util';
 import { rgbAsHex, selectText, sanitizeHtml } from '../util';
 import { nextDash, nextWidth } from './properties/linkPropertiesHelper';
 import { nextNodeSize, nextNodeType } from './properties/nodePropertiesHelper';
 import { toast } from '../ui/toast';
+import { chainPairs, hubPairs, linksInScope, missingPairs, reverseLink, targetLinks, type LinkScope, type Pair } from './nodeLinks';
 import { askConfirm, askText } from '../ui/dialog';
 import { isMac } from '../ui/keys';
-import { exportToServer, importFromServer, $serverName, initialMap, initialNode, publicToken } from './remote';
+import { documentExists, exportToServer, importFromServer, showFilePicker, $serverName, initialMap, initialNode, publicToken } from './remote';
 import { documentSearchText, findNodes, type FindHit } from './find';
 import { parseRef, type NodeRef } from './refs';
 
@@ -50,8 +51,9 @@ export const $zoom: Signal<number> = new Signal(1);
 
 export const $selecting: Signal<boolean> = new Signal(false);
 
-// Auto layout mode, saved with the document.
-export const $layout: Signal<LayoutMode> = new Signal<LayoutMode>('free');
+// The mode chosen on an empty canvas; the first node added takes it. After
+// that each constellation keeps its own mode on its nodes (Node.layout).
+export const $emptyLayout: Signal<LayoutMode> = new Signal<LayoutMode>('free');
 // Route for links that don't set their own, saved with the document.
 export const $linkRoute: Signal<LinkRoute> = new Signal<LinkRoute>('curve');
 // Where links meet their nodes, saved with the document.
@@ -122,7 +124,7 @@ export const $menu: Signal<string> = new Signal('');
 
 type DocSnapshot = {
     nodes: Node[]; links: Link[]; scene: Coordinates;
-    layout: LayoutMode; strokes: Stroke[]; frames: Frame[]; spacing: Spacing; linkRoute: LinkRoute; linkEnds: LinkEnds;
+    strokes: Stroke[]; frames: Frame[]; spacing: Spacing; linkRoute: LinkRoute; linkEnds: LinkEnds;
 };
 
 let undoStack: DocSnapshot[] = [];
@@ -131,7 +133,7 @@ let redoStack: DocSnapshot[] = [];
 function currentSnapshot(): DocSnapshot {
     return structuredClone({
         nodes: $nodes.get(), links: $links.get(), scene: $scene.get(),
-        layout: $layout.get(), strokes: $strokes.get(), frames: $frames.get(), spacing: $spacing.get(),
+        strokes: $strokes.get(), frames: $frames.get(), spacing: $spacing.get(),
         linkRoute: $linkRoute.get(), linkEnds: $linkEnds.get(),
     });
 }
@@ -145,7 +147,6 @@ function restoreSnapshot(snap: DocSnapshot): void {
     $nodes.set(snap.nodes);
     $links.set(snap.links);
     $scene.set(snap.scene);
-    $layout.set(snap.layout);
     $spacing.set(snap.spacing ?? { ...DEFAULT_SPACING });
     $linkRoute.set(snap.linkRoute ?? 'curve');
     $linkEnds.set(snap.linkEnds ?? 'sides');
@@ -192,6 +193,7 @@ function flushGestureSnapshot(): void {
 let textSnapshotTaken = false;
 
 export function commitNodeText(node: Node, html: string): void {
+    untouchedEdit = false;
     if (!textSnapshotTaken) {
         textSnapshotTaken = true;
         snapshot();
@@ -212,7 +214,7 @@ let autosaveTimer: number | undefined;
 export function documentJson(): string {
     return JSON.stringify({
         nodes: $nodes.get(), links: $links.get(), scene: $scene.get(), zoom: $zoom.get(),
-        layout: $layout.get(), strokes: $strokes.get(), frames: $frames.get(), spacing: $spacing.get(),
+        strokes: $strokes.get(), frames: $frames.get(), spacing: $spacing.get(),
         linkRoute: $linkRoute.get(), linkEnds: $linkEnds.get(),
         ...($origin.get() ? { origin: $origin.get() } : {}),
     });
@@ -311,7 +313,7 @@ export function init() {
         if (!initialMap && !publicToken) applyPendingFocus();
     }
 
-    const disposeAutosave = [$nodes, $links, $scene, $zoom, $layout, $strokes, $frames, $spacing, $linkRoute, $linkEnds]
+    const disposeAutosave = [$nodes, $links, $scene, $zoom, $strokes, $frames, $spacing, $linkRoute, $linkEnds]
         .map(s => s.subscribe(scheduleAutosave));
 
     // $serverName tracks window.location.hash (see remote.ts); react to it
@@ -319,7 +321,10 @@ export function init() {
     // the initial page load.
     const disposeServerName = $serverName.subscribe(() => {
         const name = $serverName.get();
-        if (name) {
+        if (name === savedAsName) {
+            // the document on screen is what was just stored under this name
+            savedAsName = undefined;
+        } else if (name) {
             loadFromServer(name);
         }
     });
@@ -343,7 +348,7 @@ export async function newFile(): Promise<void> {
     $lines.set([]);
     $scene.set({ x: 0, y: 0 });
     $zoom.set(1);
-    $layout.set('free');
+    $emptyLayout.set('free');
     $spacing.set({ ...DEFAULT_SPACING });
     $linkRoute.set('curve');
     $linkEnds.set('sides');
@@ -466,7 +471,7 @@ export async function addSibling() {
     if (!node) return add();
     const parentLink = $links.get().find(link => link.two === node.id && link.one !== node.id);
     const parentIndex = parentLink ? nodes0.findIndex(n => n.id === parentLink.one) : -1;
-    if (parentIndex === -1) return addNode(node.x, node.y + node.height / 2 + 60);
+    if (parentIndex === -1) return addNode(node.x, node.y + shapeBounds(node).h / 2 + 60);
     const at = childPosition(parentIndex);
     await addNode(at.x, at.y, parentIndex);
 }
@@ -481,13 +486,13 @@ function childPosition(parentIndex: number): Coordinates {
         .filter(Boolean);
     // mind map: a new branch off the root goes to the side with fewer branches
     let dir = 1;
-    if ($layout.get() === 'mindmap' && !$links.get().some(link => link.two === parent.id && link.one !== parent.id)) {
+    if (layoutOf(parent) === 'mindmap' && !$links.get().some(link => link.two === parent.id && link.one !== parent.id)) {
         const right = children.filter(c => c.x >= parent.x).length;
         dir = right > children.length - right ? -1 : 1;
     }
-    const x = parent.x + dir * (parent.width / 2 + 160);
+    const x = parent.x + dir * (shapeBounds(parent).w / 2 + 160);
     if (children.length === 0) return { x, y: parent.y };
-    const lowest = Math.max(...children.map(child => child.y + child.height / 2));
+    const lowest = Math.max(...children.map(child => child.y + shapeBounds(child).h / 2));
     return { x, y: lowest + 40 };
 }
 
@@ -495,6 +500,7 @@ function childPosition(parentIndex: number): Coordinates {
 // it and opens it for typing.
 export async function addNode(x: number, y: number, parentIndex?: number): Promise<void> {
     const id = nanoid(5);
+    const parent = parentIndex !== undefined ? $nodes.get()[parentIndex] : undefined;
 
     snapshot();
     $nodes.update((nodes0: Node[]) => {
@@ -504,13 +510,15 @@ export async function addNode(x: number, y: number, parentIndex?: number): Promi
             height: 40,
             x,
             y,
+            layout: nodes0.length || $emptyLayout.get() === 'free' ? undefined : $emptyLayout.get() as Node['layout'],
             text: 'New node',
             minHeight: 0,
             minWidth: 0,
             maxWidth: 300,
-            color: '',
+            // a child looks like its parent until changed
+            color: parent?.color ?? '',
             size: DEFAULT_NODE_FONT_SIZE,
-            type: DEFAULT_NODE_TYPE
+            type: parent?.type ?? DEFAULT_NODE_TYPE
         });
 
         makeNodesMap(nodes0);
@@ -636,17 +644,12 @@ export function hasChildren(id: NodeId): boolean {
     return $links.get().some(link => link.one === id && link.two !== id);
 }
 
-// Set by setLayout('mindmap'): the next layout balances the two sides
-// instead of keeping each branch on the side it is on.
-let balanceNext = false;
+export function layoutOf(node: Node): LayoutMode {
+    return node.layout ?? 'free';
+}
 
-function applyLayoutMode(): void {
-    const mode = $layout.get();
-    const nodes0 = $nodes.get();
-    if (mode === 'free' || nodes0.length === 0) return;
-    const positions = computeLayout(mode, nodes0, $links.get(), { hidden: collapsedHiddenIds(), balance: balanceNext, spacing: $spacing.get() });
-    balanceNext = false;
-    for (const node of nodes0) {
+function placeNodes(nodes: Node[], positions: Map<NodeId, Coordinates>): void {
+    for (const node of nodes) {
         const p = positions.get(node.id);
         if (p) {
             node.x = p.x;
@@ -655,11 +658,64 @@ function applyLayoutMode(): void {
     }
 }
 
+// Lays out every constellation that has an auto mode, each around its own
+// first root. Links change in many places, so members that disagree after a
+// link joined two constellations are settled here.
+function applyLayoutMode(): void {
+    const nodes0 = $nodes.get();
+    if (!nodes0.some(node => node.layout)) return;
+    const links = $links.get();
+    const hidden = collapsedHiddenIds();
+    for (const group of constellations(nodes0, links)) {
+        const mode = constellationMode(group, links);
+        if (mode === 'free') continue;
+        group.forEach(node => node.layout = mode);
+        placeNodes(group, computeLayout(mode, group, links, { hidden, spacing: $spacing.get() }));
+    }
+}
+
+// One balanced pass over nodes together, so several constellations stack
+// instead of landing on each other. Later passes keep the sides it gives.
+function arrangeTogether(mode: Exclude<LayoutMode, 'free'>, nodes: Node[]): void {
+    placeNodes(nodes, computeLayout(mode, nodes, $links.get(), { hidden: collapsedHiddenIds(), balance: true, spacing: $spacing.get() }));
+}
+
+// The nodes of every constellation that the selection touches. With nothing
+// selected, every node.
+function layoutScope(): Node[] {
+    const nodes0 = $nodes.get();
+    const chosen = new Set($selection.get().map(i => nodes0[i]));
+    if (!chosen.size) return nodes0;
+    return constellations(nodes0, $links.get()).filter(group => group.some(node => chosen.has(node))).flat();
+}
+
+// What the layout menu applies to: the selected constellations or the whole
+// map, unless their modes differ.
+export function currentLayout(): LayoutMode | 'mixed' {
+    if (!$nodes.get().length) return $emptyLayout.get();
+    const modes = new Set(layoutScope().map(layoutOf));
+    return modes.size === 1 ? [...modes][0] : 'mixed';
+}
+
+export function selectionHasAutoLayout(): boolean {
+    const nodes0 = $nodes.get();
+    return $selection.get().some(i => nodes0[i] && nodes0[i].layout);
+}
+
 export function setLayout(mode: LayoutMode): void {
-    if (mode === $layout.get()) return;
+    if (!$nodes.get().length) {
+        $emptyLayout.set(mode);
+        return;
+    }
+    const scope = layoutScope();
+    if (scope.every(node => layoutOf(node) === mode)) return;
     snapshot();
-    $layout.set(mode);
-    balanceNext = mode === 'mindmap';
+    if (mode === 'free') {
+        scope.forEach(node => delete node.layout);
+    } else {
+        scope.forEach(node => node.layout = mode);
+        arrangeTogether(mode, scope);
+    }
     makeLines();
     $nodes.set($nodes.get());
 }
@@ -671,34 +727,30 @@ export function setSpacing(change: Partial<Spacing>): void {
     if (Date.now() - lastSpacingSnapshot > 800) snapshot();
     lastSpacingSnapshot = Date.now();
     $spacing.set({ ...$spacing.get(), ...change });
-    if ($layout.get() !== 'free') {
+    if ($nodes.get().some(node => node.layout)) {
         makeLines();
         $nodes.set($nodes.get());
     }
 }
 
-// Free mode: lay the diagram out once; positions stay editable.
+// Free constellations: lay them out once; positions stay editable.
 export function arrangeOnce(mode: Exclude<LayoutMode, 'free'>): void {
-    const nodes0 = $nodes.get();
-    if (!nodes0.length) return;
+    const free = layoutScope().filter(node => !node.layout);
+    if (!free.length) return;
     snapshot();
-    const positions = computeLayout(mode, nodes0, $links.get(), { hidden: collapsedHiddenIds(), balance: true, spacing: $spacing.get() });
-    for (const node of nodes0) {
-        const p = positions.get(node.id);
-        if (p) {
-            node.x = p.x;
-            node.y = p.y;
-        }
-    }
+    arrangeTogether(mode, free);
     makeLines();
-    $nodes.set(nodes0);
+    $nodes.set($nodes.get());
 }
 
 // Where the segment from the center of `node` out to `toward` crosses the
 // node's outline; the center itself when it doesn't (overlapping nodes).
 function clipToShape(node: Node, toward: Pt): Pt {
     if (Math.hypot(toward.x - node.x, toward.y - node.y) < 0.5) return { x: node.x, y: node.y };
-    const hits = intersect(`M ${node.x} ${node.y} L ${toward.x} ${toward.y}`, makeShape(node));
+    // a little past the target: it can sit exactly on the outline
+    const reach = (Math.hypot(toward.x - node.x, toward.y - node.y) + 2) / Math.hypot(toward.x - node.x, toward.y - node.y);
+    const past = { x: node.x + (toward.x - node.x) * reach, y: node.y + (toward.y - node.y) * reach };
+    const hits = intersect(`M ${node.x} ${node.y} L ${past.x} ${past.y}`, makeShape(node));
     if (!hits || !hits.length) return { x: node.x, y: node.y };
     return hits.reduce((best: Pt, h: Pt) =>
         Math.hypot(h.x - toward.x, h.y - toward.y) < Math.hypot(best.x - toward.x, best.y - toward.y) ? h : best, hits[0]);
@@ -712,8 +764,9 @@ function nearestBoxPoints(a: Node, b: Node): [Pt, Pt] {
         if (lo <= hi) return [(lo + hi) / 2, (lo + hi) / 2];
         return ac < bc ? [ac + ah, bc - bh] : [ac - ah, bc + bh];
     };
-    const [ax, bx] = axis(a.x, a.width / 2, b.x, b.width / 2);
-    const [ay, by] = axis(a.y, a.height / 2, b.y, b.height / 2);
+    const sizeA = shapeBounds(a), sizeB = shapeBounds(b);
+    const [ax, bx] = axis(a.x, sizeA.w / 2, b.x, sizeB.w / 2);
+    const [ay, by] = axis(a.y, sizeA.h / 2, b.y, sizeB.h / 2);
     return [{ x: ax, y: ay }, { x: bx, y: by }];
 }
 
@@ -730,7 +783,7 @@ function routeLink(link: Link, a: Node, b: Node, i: number, spread: number, layo
         // one right angle; falls back to an elbow when the corner would sit
         // inside a node (the nodes overlap along one axis)
         const corner = cornerPoint(a, b, vertical);
-        const inside = (n: Node) => Math.abs(corner.x - n.x) <= n.width / 2 && Math.abs(corner.y - n.y) <= n.height / 2;
+        const inside = (n: Node) => pointInShape(n, corner.x, corner.y);
         if (!inside(a) && !inside(b) && !spread) {
             const start = clipToShape(a, corner);
             const end = clipToShape(b, corner);
@@ -761,8 +814,9 @@ function routeLink(link: Link, a: Node, b: Node, i: number, spread: number, layo
     if (ends === 'sides') {
         // bottom middle to top middle, or right middle to left middle
         const s = Math.sign(vertical ? dy : dx) || 1;
-        p = vertical ? { x: a.x, y: a.y + s * a.height / 2 } : { x: a.x + s * a.width / 2, y: a.y };
-        q = vertical ? { x: b.x, y: b.y - s * b.height / 2 } : { x: b.x - s * b.width / 2, y: b.y };
+        const reachA = shapeReach(a), reachB = shapeReach(b);
+        p = vertical ? { x: a.x, y: a.y + s * reachA.y } : { x: a.x + s * reachA.x, y: a.y };
+        q = vertical ? { x: b.x, y: b.y - s * reachB.y } : { x: b.x - s * reachB.x, y: b.y };
     } else if (ends === 'edge') {
         [p, q] = nearestBoxPoints(a, b);
         p = clipToShape(a, p);
@@ -820,11 +874,18 @@ function routeLink(link: Link, a: Node, b: Node, i: number, spread: number, layo
     };
 }
 
+// Where a self-link leaves the outline at the top and returns at the right.
+function selfLoopEnds(node: Node): [Pt, Pt] {
+    const { w, h } = shapeBounds(node);
+    return [clipToShape(node, { x: node.x + w * 0.2, y: node.y - h / 2 }), clipToShape(node, { x: node.x + w / 2, y: node.y - h * 0.2 })];
+}
+
 // A loop from the top edge round to the right edge.
 function selfLoop(node: Node, k: number): number[][] {
     const r = 40 + k * 18;
-    const top: number[] = [node.x + node.width * 0.2, node.y - node.height / 2];
-    const right: number[] = [node.x + node.width / 2, node.y - node.height * 0.2];
+    const [start, end] = selfLoopEnds(node);
+    const top: number[] = [start.x, start.y];
+    const right: number[] = [end.x, end.y];
     return [top, [top[0], top[1] - r], [right[0] + r, right[1]], right];
 }
 
@@ -836,7 +897,6 @@ export function makeLines(): void {
     const links: Link[] = $links.get()
     const nodes = $nodeMap.get();
     const hidden = hiddenIds();
-    const layout = $layout.get();
 
     // links between the same pair of nodes fan out instead of overlapping
     const pairKey = (link: Link) => [String(link.one), String(link.two)].sort().join('\u0000');
@@ -867,12 +927,12 @@ export function makeLines(): void {
             lines.push({
                 id: node1.id + '-self-' + i, c: makeCurve(loop), reverse: false,
                 labelAt: cubicPoint(loop, labelFraction(link)),
-                start: { x: node1.x + node1.width * 0.2, y: node1.y - node1.height / 2 },
-                end: { x: node1.x + node1.width / 2, y: node1.y - node1.height * 0.2 },
+                start: { x: loop[0][0], y: loop[0][1] },
+                end: { x: loop[3][0], y: loop[3][1] },
             });
             continue;
         }
-        lines.push(routeLink(link, nodes[link.one], nodes[link.two], i, spread, layout));
+        lines.push(routeLink(link, nodes[link.one], nodes[link.two], i, spread, layoutOf(nodes[link.one])));
     }
 
     $lines.set(lines);
@@ -943,10 +1003,11 @@ export function zoomReset(): void {
 function fitView(nodes0: Node[]): { zoom: number; scene: Coordinates } {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of nodes0) {
-        minX = Math.min(minX, n.x - n.width / 2);
-        maxX = Math.max(maxX, n.x + n.width / 2);
-        minY = Math.min(minY, n.y - n.height / 2);
-        maxY = Math.max(maxY, n.y + n.height / 2);
+        const size = shapeBounds(n);
+        minX = Math.min(minX, n.x - size.w / 2);
+        maxX = Math.max(maxX, n.x + size.w / 2);
+        minY = Math.min(minY, n.y - size.h / 2);
+        maxY = Math.max(maxY, n.y + size.h / 2);
     }
     const margin = 60;
     const w = window.innerWidth, h = window.innerHeight;
@@ -1281,6 +1342,7 @@ export function startTapLink(): void {
 }
 
 export function selectNode(i: number, e: MouseEvent) {
+    pressedNode = $nodes.get()[i]?.id;
     const from = $linkFrom.get();
     if (from !== null) {
         $linkFrom.set(null);
@@ -1378,7 +1440,7 @@ export function nodeIndexAt(x: number, y: number): number {
     for (let i = nodes0.length - 1; i >= 0; i--) {
         const n = nodes0[i];
         if (hidden.has(n.id)) continue;
-        if (Math.abs(x - n.x) <= n.width / 2 && Math.abs(y - n.y) <= n.height / 2) return i;
+        if (pointInShape(n, x, y)) return i;
     }
     return -1;
 }
@@ -1567,6 +1629,11 @@ export function startResizeWidth(i: number, e: MouseEvent) {
 export function mouseup(e: MouseEvent) {
     $resizingWidth.set(UNSELECTED);
     pendingGestureSnapshot = false;
+    if (editPress?.onText) {
+        untouchedEdit = false;
+        placeCaret(e.clientX, e.clientY);
+    }
+    editPress = null;
 
     if (inkMouseUp() || presenterMouseUp(e)) return;
     if ($endDrag.get()) {
@@ -1624,10 +1691,11 @@ export function mouseup(e: MouseEvent) {
         for(let i = 0; i<nodes0.length; i++) {
             let node = nodes0[i];
             if (hidden.has(node.id)) continue;
-            if (x < (node.x - node.width/2)
-                    && y < (node.y - node.height/2)
-                    && x1 > (node.x + node.width/2)
-                    && y1 > (node.y + node.height/2)) {
+            const size = shapeBounds(node);
+            if (x < (node.x - size.w/2)
+                    && y < (node.y - size.h/2)
+                    && x1 > (node.x + size.w/2)
+                    && y1 > (node.y + size.h/2)) {
                 selection.push(i);
             }
         }
@@ -1656,7 +1724,7 @@ export function mouseup(e: MouseEvent) {
 
     // Auto layouts own the positions: a dragged node is re-parented (dropped
     // on another node) or re-ordered among its siblings, then laid out again.
-    if (wasMoving && moved && $layout.get() !== 'free') {
+    if (wasMoving && moved && selectionHasAutoLayout()) {
         const selection = $selection.get();
         if (selection.length === 1) dropInLayout(selection[0]);
         makeLines();
@@ -1678,7 +1746,7 @@ function dropInLayout(index: number): void {
     for (let i = nodes0.length - 1; i >= 0; i--) {
         const n = nodes0[i];
         if (i === index || below.has(n.id) || hidden.has(n.id)) continue;
-        if (Math.abs(node.x - n.x) <= n.width / 2 && Math.abs(node.y - n.y) <= n.height / 2) {
+        if (pointInShape(n, node.x, node.y)) {
             target = n;
             break;
         }
@@ -1695,12 +1763,13 @@ function dropInLayout(index: number): void {
         return;
     }
 
-    if (parentId === undefined || $layout.get() === 'radial') return;
-    const axis = $layout.get() === 'down' ? 'x' : 'y';
+    const mode = layoutOf(node);
+    if (parentId === undefined || mode === 'radial') return;
+    const axis = mode === 'down' ? 'x' : 'y';
     const map = $nodeMap.get();
     const parent = map[parentId];
     const parentIsRoot = !tree.parent.has(parentId);
-    const sameSide = (id: NodeId) => $layout.get() !== 'mindmap' || !parentIsRoot
+    const sameSide = (id: NodeId) => mode !== 'mindmap' || !parentIsRoot
         || Math.sign(map[id].x - parent.x) === Math.sign(node.x - parent.x);
     const siblings = (tree.children.get(parentId) ?? []).filter(id => id !== node.id && sameSide(id));
 
@@ -1723,14 +1792,33 @@ type MoveSession = { origins: { i: number; x: number; y: number }[]; bbox: Box; 
 let moveSession: MoveSession | null = null;
 let gestureMoved = false;
 
-const boxOf = (n: Node): Box => ({ x: n.x - n.width / 2, y: n.y - n.height / 2, w: n.width, h: n.height });
+const boxOf = (n: Node): Box => {
+    const { w, h } = shapeBounds(n);
+    return { x: n.x - w / 2, y: n.y - h / 2, w, h };
+};
+
+// What a drag moves: the selection, plus the whole constellation of any
+// selected auto layout root, which would otherwise follow only on drop.
+export function nodesMovedWith(selection: number[]): number[] {
+    const nodes0 = $nodes.get();
+    const links = $links.get();
+    const chosen = new Set(selection);
+    const indexOf = new Map(nodes0.map((node, i) => [node.id, i]));
+    for (const group of constellations(nodes0, links)) {
+        if (!group[0].layout) continue;
+        if (buildTree(group, links).roots.some(id => chosen.has(indexOf.get(id)!))) {
+            group.forEach(node => chosen.add(indexOf.get(node.id)!));
+        }
+    }
+    return [...chosen];
+}
 
 function startMoveSession(selection: number[]): MoveSession {
     const nodes0 = $nodes.get();
     const chosen = new Set(selection);
     const hidden = hiddenIds();
     return {
-        origins: selection.map(i => ({ i, x: nodes0[i].x, y: nodes0[i].y })),
+        origins: nodesMovedWith(selection).map(i => ({ i, x: nodes0[i].x, y: nodes0[i].y })),
         bbox: unionBox(selection.map(i => boxOf(nodes0[i]))),
         others: nodes0.filter((n, i) => !chosen.has(i) && !hidden.has(n.id)).map(boxOf),
         raw: { x: 0, y: 0 },
@@ -1782,6 +1870,10 @@ export function mousemove(e: MouseEvent) {
         const moving = $moving.get();
         if(selection.length === 0 || !moving) return
         if (e.movementX === 0 && e.movementY === 0) return
+        if (editPress) {
+            if (Math.hypot(e.clientX - editPress.x, e.clientY - editPress.y) < EDIT_DRAG_SLOP) return;
+            editPress = null;
+        }
 
         flushGestureSnapshot();
         if (!moveSession) moveSession = startMoveSession(selection);
@@ -1797,7 +1889,7 @@ export function mousemove(e: MouseEvent) {
 
         let guides: GuideLine[] = [];
         // Alt drags without snapping; auto layouts place nodes themselves
-        if ($snapEnabled.get() && $layout.get() === 'free' && !e.altKey) {
+        if ($snapEnabled.get() && !selectionHasAutoLayout() && !e.altKey) {
             const b = session.bbox;
             const r = snapMove({ ...b, x: b.x + tx, y: b.y + ty }, session.others, 5 / zoom);
             if (locked !== 'x') tx += r.dx;
@@ -2047,7 +2139,8 @@ function applyImportedContent(content: string, invalidMessage: string): boolean 
         $scene.set({ x: parsed.scene.x, y: parsed.scene.y });
     }
     $zoom.set(typeof parsed.zoom === 'number' && Number.isFinite(parsed.zoom) ? clampZoom(parsed.zoom) : 1);
-    $layout.set(['free', 'mindmap', 'right', 'down', 'radial', 'timeline'].includes(parsed.layout as string) ? parsed.layout! : 'free');
+    $emptyLayout.set('free');
+    if (Array.isArray(parsed.nodes)) moveLayoutToNodes(parsed);
     $spacing.set(parsed.spacing && typeof parsed.spacing.level === 'number' && typeof parsed.spacing.sibling === 'number'
         ? { level: parsed.spacing.level, sibling: parsed.spacing.sibling } : { ...DEFAULT_SPACING });
     $linkRoute.set(LINK_ROUTES.includes(parsed.linkRoute as LinkRoute) ? parsed.linkRoute! : 'curve');
@@ -2073,6 +2166,18 @@ type ParsedDocument = {
     layout?: LayoutMode, strokes?: Stroke[], frames?: Frame[], spacing?: Spacing, linkRoute?: LinkRoute, linkEnds?: LinkEnds,
     origin?: DocOrigin,
 };
+
+// Older documents have one layout for the whole map; it moves onto the nodes.
+// Node values come from the file, so anything unknown counts as free.
+function moveLayoutToNodes(parsed: ParsedDocument): void {
+    const fromDocument = !parsed.nodes.some(node => node?.layout) && AUTO_LAYOUTS.includes(parsed.layout);
+    for (const node of parsed.nodes) {
+        if (!node) continue;
+        if (fromDocument) node.layout = parsed.layout as Node['layout'];
+        else if (!AUTO_LAYOUTS.includes(node.layout)) delete node.layout;
+    }
+    delete parsed.layout;
+}
 
 function validOrigin(o: any): o is DocOrigin {
     return !!o && typeof o.listing === 'string' && typeof o.title === 'string' && typeof o.owner === 'string';
@@ -2101,6 +2206,7 @@ function normalizeNode(node: Node) {
         type: node.type,
         notes: node.notes ?? null,
         ref: node.ref ?? null,
+        layout: node.layout ?? null,
     };
 }
 
@@ -2162,6 +2268,7 @@ function parseDocument(content: string, invalidMessage: string): ParsedDocument 
         return null;
     }
 
+    moveLayoutToNodes(parsed);
     return parsed;
 }
 
@@ -2183,14 +2290,14 @@ async function loadContent(content: string, invalidMessage: string): Promise<boo
 
     const incomingScene = effectiveScene(parsed);
     const currentIsEmpty = currentNodes.length === 0 && currentLinks.length === 0;
-    const extras = (layout: unknown, strokes: unknown, frames: unknown, spacing: unknown) =>
-        JSON.stringify([layout ?? 'free', strokes ?? [], frames ?? [], spacing ?? DEFAULT_SPACING]);
+    const extras = (strokes: unknown, frames: unknown, spacing: unknown) =>
+        JSON.stringify([strokes ?? [], frames ?? [], spacing ?? DEFAULT_SPACING]);
     const routeDiffers = $linkRoute.get() !== (parsed.linkRoute ?? 'curve')
         || $linkEnds.get() !== (parsed.linkEnds ?? 'sides');
     const differs = canonicalSnapshot(currentNodes, currentLinks, currentScene) !==
         canonicalSnapshot(parsed.nodes, parsed.links, incomingScene)
-        || extras($layout.get(), $strokes.get(), $frames.get(), $spacing.get())
-            !== extras(parsed.layout, parsed.strokes, parsed.frames, parsed.spacing)
+        || extras($strokes.get(), $frames.get(), $spacing.get())
+            !== extras(parsed.strokes, parsed.frames, parsed.spacing)
         || routeDiffers;
 
     if (!currentIsEmpty && differs) {
@@ -2205,28 +2312,52 @@ async function loadContent(content: string, invalidMessage: string): Promise<boo
     return applyImportedContent(content, invalidMessage);
 }
 
-// Resolves whether the document was saved.
-export async function doExportToServer(): Promise<boolean> {
-    const saved = await exportToServer(documentJson(), documentSearchText($nodes.get(), $links.get()));
+// Set while the hash catches up with a first save, so that hash change does
+// not load back the document just stored.
+let savedAsName: string | undefined;
+
+// The name for a first save, or null when the user backs out. Saving over a
+// document that already exists needs a yes.
+async function askSaveName(): Promise<string | null> {
+    const name = (await askText('Specify name', '', 'Save'))?.trim();
+    if (!name) return null;
+    let exists: boolean;
+    try {
+        exists = await documentExists(name);
+    } catch (e) {
+        toast((e as Error).message, 'error');
+        return null;
+    }
+    return !exists || await askConfirm(`"${name}" already exists. Replace it?`, 'Replace') ? name : null;
+}
+
+// Resolves whether the document was saved. firstName: the name to use if the
+// document has none yet; without it the user is asked.
+export async function doExportToServer(firstName?: string): Promise<boolean> {
+    const current = $serverName.get();
+    const name = current ?? firstName ?? await askSaveName();
+    if (!name) return false;
+    const saved = await exportToServer(documentJson(), documentSearchText($nodes.get(), $links.get()), name);
     // the document now lives on the server; don't resurrect a stale
     // local copy on the next bare-URL visit
     if (saved) {
         clearAutosave();
         $preview.set(null);
+        if (!current) {
+            savedAsName = name;
+            window.location.hash = encodeURIComponent(name);
+        }
     }
     return saved;
 }
 
-// "Load from server" menu action - prompts for a document name the same
-// way a page load with no #hash would (see store.ts's init(), which just
-// no-ops rather than prompting), so this doubles as a way to jump to a
-// different document (which may or may not exist yet in folderfoo)
-// without reloading the page. Setting window.location.hash triggers the
-// actual load via $serverName's subscribe() in init() above.
+// "Open" menu action: browse the documents on the server.
 export async function doImportFromServer(): Promise<void> {
-    const name = await askText('Document name to open', '', 'Open');
-    if (!name) return;
-    window.location.hash = name;
+    try {
+        await showFilePicker();
+    } catch (e) {
+        toast('Could not reach the server to list your documents', 'error');
+    }
 }
 
 const SAFE_COLOR = /^(#[0-9a-f]{3,8}|[a-z]{3,20}|rgba?\([\d\s.,%]+\)|hsla?\([\d\s.,%]+\)|var\(--[a-z0-9-]+\))$/i;
@@ -2305,7 +2436,7 @@ export function closePreview(): void {
     $frames.set([]);
     $selection.set([]);
     makeNodesMap([]);
-    $layout.set('free');
+    $emptyLayout.set('free');
     $scene.set({ x: 0, y: 0 });
     $zoom.set(1);
     resetUndoHistory();
@@ -2395,6 +2526,89 @@ export function toggleLinkArrow(toggleDirection: Direction): void {
         links[i].direction = toggleArrows(links[i].direction, toggleDirection)
         return links
     })
+}
+
+// --- links of the selected nodes, used by the context menu ---
+
+// The node last pressed, which is the one a context menu opened on.
+let pressedNode: NodeId | undefined;
+
+function selectedNodes(): Node[] {
+    const nodes0 = $nodes.get();
+    return $selection.get().map(i => nodes0[i]).filter(Boolean);
+}
+
+function selectedIds(): Set<NodeId> {
+    return new Set(selectedNodes().map(node => node.id));
+}
+
+// The center of "connect all to": the node the menu opened on.
+export function connectionHub(): Node | undefined {
+    const chosen = selectedNodes();
+    return chosen.find(node => node.id === pressedNode) ?? chosen[0];
+}
+
+function connectionPairs(kind: 'chain' | 'hub'): Pair[] {
+    const chosen = selectedNodes();
+    if (chosen.length < 2) return [];
+    return missingPairs(kind === 'chain' ? chainPairs(chosen) : hubPairs(connectionHub()!.id, chosen), $links.get());
+}
+
+export function canConnect(kind: 'chain' | 'hub'): boolean {
+    return connectionPairs(kind).length > 0;
+}
+
+export function connectSelection(kind: 'chain' | 'hub'): void {
+    const pairs = connectionPairs(kind);
+    if (!pairs.length) return;
+    snapshot();
+    pairs.forEach(([one, two]) => addLink(one, two));
+    makeLines();
+    $nodes.set($nodes.get());
+}
+
+export function selectionLinkCount(scope: LinkScope): number {
+    return linksInScope($links.get(), selectedIds(), scope).length;
+}
+
+export function disconnectSelection(scope: LinkScope): void {
+    const gone = new Set(linksInScope($links.get(), selectedIds(), scope));
+    if (!gone.size) return;
+    snapshot();
+    $links.update(links => links.filter(link => !gone.has(link)));
+    $selectedLink.set(UNSELECTED);
+    makeLines();
+    $nodes.set($nodes.get());
+}
+
+export function selectionTargetLinks(): Link[] {
+    return targetLinks($links.get(), selectedIds());
+}
+
+export function reverseSelectionLinks(): void {
+    const links = selectionTargetLinks();
+    if (!links.length) return;
+    snapshot();
+    links.forEach(link => reverseLink(link, link.route ?? $linkRoute.get()));
+    $links.set($links.get());
+    makeLines();
+    $nodes.set($nodes.get());
+}
+
+export function setSelectionArrows(direction: Direction): void {
+    const links = selectionTargetLinks();
+    if (!links.length) return;
+    snapshot();
+    links.forEach(link => link.direction = direction);
+    $links.set($links.get());
+    makeLines();
+}
+
+// The selected link, from its own menu.
+export function reverseSelectedLink(): void {
+    updateSelectedLink(link => reverseLink(link, link.route ?? $linkRoute.get()));
+    makeLines();
+    $nodes.set($nodes.get());
 }
 
 // --- direct setters, used by the context menu ---
@@ -2548,8 +2762,43 @@ export async function startTypingEdit(char: string): Promise<void> {
     sel?.addRange(range);
 }
 
+// --- dragging the node being edited ---
+
+// Pointer travel that turns a press on the text into a drag, in screen px.
+const EDIT_DRAG_SLOP = 4;
+// True from the start of an edit until its first keystroke or caret click:
+// the text is still whole-selected, so a press on it means the node.
+let untouchedEdit = false;
+let editPress: { x: number; y: number; onText: boolean } | null = null;
+
+// A press on the node being edited. A press on its edge, or anywhere on it
+// before its text is touched, drags the node and keeps the focus. Other text
+// presses stay with the browser, to place the caret and select. Answers
+// whether the press was taken.
+export function pressEditedNode(i: number, e: MouseEvent): boolean {
+    const selection = $selection.get();
+    if (!$editing.get() || e.button !== 0 || selection.length !== 1 || selection[0] !== i) return false;
+    const onText = e.composedPath().some(el => (el as HTMLElement).isContentEditable);
+    if (onText && !untouchedEdit) return false;
+    e.preventDefault();
+    editPress = { x: e.clientX, y: e.clientY, onText };
+    pendingGestureSnapshot = true;
+    $moving.set(true);
+    return true;
+}
+
+// The caret goes where a press that never became a drag would have put it.
+function placeCaret(x: number, y: number): void {
+    const selected = window.getSelection();
+    if (!selected?.rangeCount) return;
+    const at = (document as any).caretPositionFromPoint?.(x, y, { shadowRoots: [viewRoot] });
+    if (at?.offsetNode && (viewRoot as unknown as globalThis.Node).contains(at.offsetNode)) selected.collapse(at.offsetNode, at.offset);
+    else selected.collapseToEnd();
+}
+
 export async function toggleEdit(id: NodeId) {
     textSnapshotTaken = false;
+    untouchedEdit = true;
     $editing.set(true);
     await tick();
     let element = getById(`e${id}`);
@@ -2704,9 +2953,12 @@ function rememberColor(hex: string): void {
 let drawing: Stroke | null = null;
 let erasing = false;
 let eraseSnapshotTaken = false;
+// Shown once per pick of the tool, for a drag that erased nothing.
+let eraserHintShown = false;
 
 export function setTool(tool: Tool): void {
     $tool.set(tool);
+    eraserHintShown = false;
     if (tool !== 'select') {
         $selection.set([]);
         $selectedStrokes.set([]);
@@ -2766,6 +3018,10 @@ function inkMouseUp(): boolean {
         // a click leaves a dot
         drawing.points.push(drawing.points[0] + 0.1, drawing.points[1]);
         $strokes.set([...$strokes.get()]);
+    }
+    if (erasing && !eraseSnapshotTaken && !eraserHintShown) {
+        eraserHintShown = true;
+        toast('The eraser only removes pen and highlighter ink. To delete nodes or links, select them and press Backspace.');
     }
     drawing = null;
     erasing = false;

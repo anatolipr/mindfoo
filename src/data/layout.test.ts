@@ -1,6 +1,6 @@
 import { test, expect } from 'vitest'
-import { buildTree, computeLayout, preorder } from './layout'
-import type { Link, Node } from './types'
+import { buildTree, computeLayout, constellationMode, constellations, preorder } from './layout'
+import { NodeType, type Link, type Node } from './types'
 
 const node = (id: string, x = 0, y = 0): Node =>
     ({ id, x, y, width: 100, height: 40, minWidth: 0, minHeight: 0, color: '', text: id })
@@ -8,6 +8,29 @@ const link = (one: string, two: string): Link => ({ one, two, direction: 'none' 
 
 const nodes = [node('r', 500, 300), node('a'), node('b'), node('c'), node('d')]
 const links = [link('r', 'a'), link('r', 'b'), link('a', 'c'), link('r', 'd')]
+
+test('constellations group nodes linked in either direction, in document order', () => {
+    const groups = constellations([node('a'), node('b'), node('c'), node('d'), node('e')],
+        [link('a', 'c'), link('d', 'c'), link('b', 'b'), link('a', 'gone')])
+    expect(groups.map(g => g.map(n => n.id))).toEqual([['a', 'c', 'd'], ['b'], ['e']])
+})
+
+test('a constellation takes its first auto root mode, then any member mode', () => {
+    const auto = (id: string, layout: Node['layout']) => ({ ...node(id), layout })
+    expect(constellationMode([node('a'), node('b')], [link('a', 'b')])).toBe('free')
+    // the parent's mode reaches the group linked under it
+    expect(constellationMode([auto('a', 'right'), auto('b', 'down')], [link('a', 'b')])).toBe('right')
+    // a free parent does not dissolve an auto layout
+    expect(constellationMode([node('a'), auto('b', 'down')], [link('a', 'b')])).toBe('down')
+    // two roots: the second is auto, the first is free
+    expect(constellationMode([node('a'), auto('b', 'radial'), node('c')], [link('a', 'c'), link('b', 'c')])).toBe('radial')
+})
+
+test('siblings make room for what a shape draws, not only for its text box', () => {
+    const wide = (id: string): Node => ({ ...node(id), width: 300, height: 40, type: NodeType.circle })
+    const pos = computeLayout('right', [node('r'), wide('a'), wide('b')], [link('r', 'a'), link('r', 'b')])
+    expect(pos.get('b')!.y - pos.get('a')!.y).toBeGreaterThanOrEqual(300)
+})
 
 test('buildTree follows link order and finds roots', () => {
     const tree = buildTree(nodes, links)
