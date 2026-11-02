@@ -27,15 +27,16 @@ vi.mock('./data/remote', async () => {
         importFromServer: vi.fn(async () => null),
         loadPublicLink: vi.fn(),
         loadPublicFolderDocument: vi.fn(),
-        authGuard: vi.fn(async () => ({
-            searchDirectory: async () => ({
+        authGuard: vi.fn(async () => ({})),
+        directoryClient: vi.fn(async () => ({
+            search: async () => ({
                 total: 1, tags: [{ tag: 'physics', count: 1 }],
                 items: [{
                     id: 'L1', owner: 'ann', title: 'Atoms', description: 'All about atoms', tags: ['physics'], license: 'CC-BY-4.0',
                     forkedFrom: null, version: 2, stats: { nodes: 3, links: 2 }, clones: 5, views: 9, status: 'listed', hasMarkdown: true, updatedAt: '',
                 }],
             }),
-            directoryMarkdownUrl: (id: string) => `https://x/${id}`,
+            markdownUrl: (id: string) => `https://x/${id}`,
         })),
     };
 });

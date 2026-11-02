@@ -126,7 +126,7 @@ import { determineArrow } from './data/directions';
 import { makeShape, shapeBounds, shapeDetail } from './geo';
 import { FOLDERFOO_HOST, TENANT_ID } from './server-config';
 import { publicToken, loadPublicLink, loadPublicFolderDocument, initialMap, initialExplore } from './data/remote';
-import { $directoryOpen, $publishOpen, cloneOpenListing, markdownUrl, openListing, reportOpenListing } from './data/directory';
+import { $directoryOpen, $publishOpen, cloneOpenListing, markdownUrl, openListing, reportOpenListing, showDirectoryPage } from './data/directory';
 import {
     $findOpen, $findSet, $nodeMap, $notesOpen, $origin, $preview, $trail, closePreview, followNodeRef, goBack, measureNode, openFind,
 } from './data/store';
@@ -289,7 +289,7 @@ export class MindFooApp extends LitElement {
         }).catch(() => { /* folderfoo unreachable: the app still works locally */ });
         if (publicToken) void openPublicLink(publicToken);
         else if (initialMap) void openListing(initialMap);
-        if (initialExplore) $directoryOpen.set(true);
+        if (initialExplore) showDirectoryPage();
 
         // Toast for "someone joined via one of your share links" - see
         // remote.ts's checkShareLinkJoins() call, which is what actually
@@ -1290,7 +1290,7 @@ export class MindFooApp extends LitElement {
         const stop = (e: Event) => e.stopPropagation();
         return html`<div class="starters" data-ui @mousedown=${stop} @dblclick=${stop} @contextmenu=${stop}>
             ${TEMPLATES.map(t => html`<button @click=${() => runTemplate(t.id)}>${t.label}</button>`)}
-            <button @click=${() => $directoryOpen.set(true)}>${icons.globe} Public maps</button>
+            <button @click=${() => showDirectoryPage()}>${icons.globe} Public maps</button>
         </div>`;
     }
 
@@ -1324,7 +1324,7 @@ export class MindFooApp extends LitElement {
                 <button title="File" @click=${(e: MouseEvent) => openFileMenu(e.currentTarget as HTMLElement)}>${icons.menu}</button>
                 <button class="wide" title="Command palette (${sc('mod+k')}, or Shift twice)" @click=${openPalette}>${icons.search}</button>
                 <button title="Find in this map (${sc('mod+f')})" @click=${openFind}>${icons.find}</button>
-                <button title="Public maps" @click=${() => $directoryOpen.set(true)}>${icons.globe}</button>
+                <button title="Public maps" @click=${() => showDirectoryPage()}>${icons.globe}</button>
                 <span class="sep"></span>
                 <button title="Undo (${sc('mod+z')})" @click=${undo}>${icons.undo}</button>
                 <button title="Redo (${sc('mod+shift+z')})" @click=${redo}>${icons.redo}</button>

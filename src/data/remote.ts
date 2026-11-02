@@ -37,13 +37,15 @@ if (publicToken) {
     window.history.replaceState(null, '', publicTokenUrl.toString());
 }
 
-// `?node=` is a deep link to one node. `?map=` opens a public directory listing
-// and `?explore` the directory itself. Unlike a public token these stay in the
-// URL: they are not secrets, and the address should keep working when copied.
+// `?node=` is a deep link to one node. `/public` is the directory page and
+// `/public/<id>` opens one listing; `?explore` and `?map=` are their older
+// spellings, which keep working. Unlike a public token these stay in the URL:
+// they are not secrets, and the address should keep working when copied.
 const pageParams = new URLSearchParams(window.location.search);
+const publicPath = window.location.pathname.match(/^\/public(?:\/([^/]+))?\/?$/);
 export const initialNode = pageParams.get('node');
-export const initialMap = pageParams.get('map');
-export const initialExplore = pageParams.has('explore');
+export const initialMap = publicPath?.[1] ? decodeURIComponent(publicPath[1]) : pageParams.get('map');
+export const initialExplore = (!!publicPath && !publicPath[1]) || pageParams.has('explore');
 
 interface AuthGuard {
     redeemShareTokenFromUrl(): void;
@@ -51,14 +53,18 @@ interface AuthGuard {
     getPublicLink(token: string): Promise<PublicLinkView>;
     getPublicFolderFile(token: string, relPath: string): Promise<Response>;
     listFiles(query?: string, folderPath?: string, recursive?: boolean, owner?: string): Promise<SavedFileRow[] | { files: SavedFileRow[] }>;
-    publishToDirectory(listing: PublishRequest): Promise<{ id: string; version: number; status: string }>;
-    listMyPublished(): Promise<{ items: DirectoryListing[] }>;
+}
+
+// Folderfoo's directory SDK (its /sdk/v1/directory.js, typed by directory.d.ts).
+export interface DirectoryClient {
+    search(query: DirectoryQuery): Promise<DirectoryPage>;
+    get(id: string): Promise<DirectoryListing & { content: string; markdown: string | null }>;
+    markdownUrl(id: string): string;
+    countClone(id: string): Promise<unknown>;
+    report(id: string, reason: string): Promise<unknown>;
+    publish(listing: PublishRequest): Promise<{ id: string; version: number; status: string; heldReason: string | null }>;
+    listMine(): Promise<{ items: DirectoryListing[] }>;
     unpublish(id: string): Promise<unknown>;
-    searchDirectory(query: DirectoryQuery): Promise<DirectoryPage>;
-    getDirectoryListing(id: string): Promise<DirectoryListing & { content: string; markdown: string | null }>;
-    countDirectoryClone(id: string): Promise<unknown>;
-    reportDirectoryListing(id: string, reason: string): Promise<unknown>;
-    directoryMarkdownUrl(id: string): string;
 }
 
 export type SavedFileRow = { name: string; folderPath?: string };
@@ -77,6 +83,7 @@ export interface DirectoryListing {
     clones: number;
     views: number;
     status: 'listed' | 'pending' | 'hidden';
+    heldReason?: string | null;
     hasMarkdown: boolean;
     updatedAt: string;
 }
@@ -85,7 +92,7 @@ export type DirectoryQuery = { q?: string; tag?: string; sort?: 'popular' | 'new
 export type DirectoryPage = { total: number; items: DirectoryListing[]; tags: { tag: string; count: number }[] };
 export type PublishRequest = {
     name: string; title: string; description?: string; tags?: string[]; license?: string;
-    forkedFrom?: string; markdown?: string;
+    forkedFrom?: string; markdown?: string; confirmSecrets?: boolean;
 };
 
 export interface PublicLinkView {
@@ -111,6 +118,13 @@ const authGuardPromise: Promise<AuthGuard> = Promise.all([
 
 export function authGuard(): Promise<AuthGuard> {
     return authGuardPromise;
+}
+
+const directoryClientPromise: Promise<DirectoryClient> = import(/* @vite-ignore */ `${FOLDERFOO_HOST}/sdk/v1/directory.js`)
+    .then(({ createDirectoryClient }) => createDirectoryClient({ tenantId: TENANT_ID }));
+
+export function directoryClient(): Promise<DirectoryClient> {
+    return directoryClientPromise;
 }
 
 // Resolves a public link: a file link's document (the same JSON string

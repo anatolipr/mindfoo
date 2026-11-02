@@ -25,6 +25,7 @@ vi.mock('./remote', async () => {
         documentExists: vi.fn(async () => false),
         showFilePicker: vi.fn(async () => {}),
         authGuard: vi.fn(),
+        directoryClient: vi.fn(),
     };
 });
 
@@ -33,7 +34,7 @@ import {
     clonePreview, closeFind, closePreview, doExportToServer, documentJson, fitNodes, focusNode, followRef,
     goBack, doImportFromServer, hiddenIds, loadSharedDocument, sanitizeSharedDocument, makeLines, makeNodesMap, addNode, $lines, inkMouseDown, setTool, connectSelection, disconnectSelection, reverseSelectionLinks, reverseSelectedLink, setSelectionArrows, canConnect, $selectedLink, $strokes, mouseup, nodePath, nodesMovedWith, pressEditedNode, toggleEdit, finishEdit, commitNodeText, $moving, $editing, openFind, scheduleAutosave, setFindQuery, setLayout, stepFind, undo, currentLayout, MIN_ZOOM,
 } from './store';
-import { $serverName, authGuard, documentExists, exportToServer, showFilePicker } from './remote';
+import { $serverName, directoryClient, documentExists, exportToServer, showFilePicker } from './remote';
 import { publishCurrent } from './directory';
 import { $dialog } from '../ui/dialog';
 import { $toasts } from '../ui/toast';
@@ -243,24 +244,24 @@ test('a first save stops when the name cannot be checked, such as a cancelled lo
 
 test('publishing an unsaved map saves it under its title, numbered if taken', async () => {
     setDoc([node('m', 'mine')]);
-    const publishToDirectory = vi.fn(async () => ({ id: 'L', status: 'listed', version: 1 }));
-    vi.mocked(authGuard).mockResolvedValue({ publishToDirectory } as any);
+    const publish = vi.fn(async () => ({ id: 'L', status: 'listed', version: 1, heldReason: null }));
+    vi.mocked(directoryClient).mockResolvedValue({ publish } as any);
     vi.mocked(documentExists).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     const result = await publishCurrent({ title: 'Fuel: a/b plan', description: '', tags: [], license: 'CC0-1.0' });
     expect(result.ok).toBe(true);
     expect($dialog.get()).toBe(null);
     expect(vi.mocked(exportToServer).mock.lastCall![2]).toBe('Fuel a b plan 2');
-    expect((publishToDirectory.mock.lastCall as any[])[0].name).toBe('Fuel a b plan 2');
+    expect((publish.mock.lastCall as any[])[0].name).toBe('Fuel a b plan 2');
     window.location.hash = '';
 });
 
 test('publishing reports a failed name check instead of saving', async () => {
     setDoc([node('m', 'mine')]);
     vi.mocked(exportToServer).mockClear();
-    vi.mocked(authGuard).mockResolvedValue({} as any);
+    vi.mocked(directoryClient).mockResolvedValue({} as any);
     vi.mocked(documentExists).mockRejectedValueOnce(new Error('Login cancelled'));
     const result = await publishCurrent({ title: 'T', description: '', tags: [], license: 'CC0-1.0' });
-    expect(result).toEqual({ ok: false, error: 'Login cancelled', reasons: [] });
+    expect(result).toEqual({ ok: false, error: 'Login cancelled', reasons: [], secrets: [] });
     expect(exportToServer).not.toHaveBeenCalled();
 });
 

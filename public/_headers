@@ -1,0 +1,4 @@
+/public
+  X-Robots-Tag: noindex
+/public/*
+  X-Robots-Tag: noindex

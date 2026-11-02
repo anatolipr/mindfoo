@@ -18,7 +18,7 @@ import { toggleTheme } from '../data/theme';
 import type { PaletteItem } from '../ui/command-palette';
 import { copySelection, cutSelection, pasteAt, duplicateSelection, copyAsOutline, copyAsMermaid, copyAsMarkdown, insertTemplate } from '../data/clipboard';
 import { TEMPLATES } from '../data/templates';
-import { $directoryOpen, $publishOpen, currentMarkdown, suggestedTitle } from '../data/directory';
+import { $publishOpen, currentMarkdown, showDirectoryPage, suggestedTitle } from '../data/directory';
 import { saveMarkdown } from '../data/exportImage';
 import { htmlToText } from '../data/textFormats';
 import type { LabelPos, LayoutMode, LinkEnds, LinkRoute } from '../data/types';
@@ -496,7 +496,7 @@ export function runAction(id: string): void {
             if (node) void copyNodeLink(node.id);
             return;
         }
-        case 'explore': $directoryOpen.set(true); return;
+        case 'explore': showDirectoryPage(); return;
         case 'publish': $publishOpen.set(true); return;
         case 'template': void runTemplate(arg); return;
         case 'exportMarkdown': saveMarkdown(currentMarkdown(suggestedTitle()), suggestedTitle() || 'mindfoo'); return;

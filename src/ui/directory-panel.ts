@@ -2,8 +2,8 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { SignalWatcher } from 'avosignals';
 import {
-    $directoryOpen, $publishOpen, currentMarkdown, markdownUrl, myListings, openListing, publishCurrent,
-    searchDirectory, suggestedTitle, unpublishListing,
+    $directoryOpen, $publishOpen, currentMarkdown, leaveDirectoryPage, listingAddress, markdownUrl, myListings, openListing, publishCurrent,
+    searchDirectory, suggestedTitle, unpublishListing, type SecretFinding,
 } from '../data/directory';
 import { $origin } from '../data/store';
 import { type DirectoryListing, type DirectoryPage } from '../data/remote';
@@ -47,7 +47,8 @@ const shared = css`
     @media (pointer: coarse) { input, textarea, select { font-size: 16px; } button { padding: 9px 12px; } }
 `;
 
-// Browses the public directory: search, tags, open, and the visitor's own listings.
+// The public directory page at /public: search, tags, open, and the visitor's
+// own listings. It fills the window.
 @customElement('mf-directory-panel')
 export class DirectoryPanel extends LitElement {
     private watcher = new SignalWatcher(this);
@@ -61,7 +62,8 @@ export class DirectoryPanel extends LitElement {
     @state() private accessor mine: DirectoryListing[] | null = null;
 
     static styles = [shared, css`
-        .panel { width: min(960px, calc(100vw - 32px)); height: min(760px, calc(100dvh - 32px)); }
+        :host { background: var(--menu-bg); }
+        .panel { width: min(1100px, 100vw); height: 100dvh; box-shadow: none; border-radius: 0; max-height: none; }
         .controls { display: flex; gap: 6px; padding: 0 14px 8px; flex-wrap: wrap; }
         .controls input { flex: 1; min-width: 160px; }
         .tags { display: flex; gap: 4px; padding: 0 14px 8px; flex-wrap: wrap; }
@@ -115,7 +117,8 @@ export class DirectoryPanel extends LitElement {
         return html`<article>
             <h3>${item.title}</h3>
             <div class="meta">by ${item.owner} · ${item.stats.nodes ?? 0} nodes · ${item.clones} clones · ${item.license}${item.version > 1 ? ` · v${item.version}` : ''}
-                ${own && item.status !== 'listed' ? html`<span class="status">${item.status === 'pending' ? 'Waiting for review' : 'Hidden after reports'}</span>` : nothing}</div>
+                ${own && item.status !== 'listed' ? html`<span class="status" title=${item.heldReason ?? ''}>${item.status === 'pending' ? 'Waiting for review' : 'Hidden after reports'}</span>` : nothing}</div>
+            ${own && item.status === 'pending' && item.heldReason ? html`<div class="meta">${item.heldReason}</div>` : nothing}
             ${item.description ? html`<p>${item.description}</p>` : nothing}
             ${item.tags.length ? html`<div>${item.tags.map(tag => html`<span class="chip">#${tag}</span>`)}</div>` : nothing}
             <div class="actions">
@@ -129,14 +132,14 @@ export class DirectoryPanel extends LitElement {
     render() {
         const page = this.page;
         return html`
-            <div class="panel" data-ui role="dialog" aria-label="Public maps"
+            <div class="panel" data-ui role="main" aria-label="Public maps"
                 @mousedown=${(e: MouseEvent) => e.stopPropagation()}
-                @keydown=${(e: KeyboardEvent) => { e.stopPropagation(); if (e.key === 'Escape') $directoryOpen.set(false); }}>
+                @keydown=${(e: KeyboardEvent) => { e.stopPropagation(); if (e.key === 'Escape') leaveDirectoryPage(); }}>
                 <header>
                     <h2>${this.mine ? 'My published maps' : 'Public maps'}</h2>
                     <button @click=${() => this.mine ? (this.mine = null) : this.showMine()}>${this.mine ? 'All public maps' : 'My published maps'}</button>
-                    <button class="primary" @click=${() => { $directoryOpen.set(false); $publishOpen.set(true); }}>Publish this map</button>
-                    <button class="plain" aria-label="Close" @click=${() => $directoryOpen.set(false)}>✕</button>
+                    <button class="primary" @click=${() => { leaveDirectoryPage(); $publishOpen.set(true); }}>Publish this map</button>
+                    <button @click=${() => leaveDirectoryPage()}>Back to my map</button>
                 </header>
                 ${this.mine ? html`<div class="grid">
                     ${this.mine.length ? this.mine.map(item => this.card(item, true)) : html`<div class="note">You have not published anything yet.</div>`}
@@ -174,6 +177,8 @@ export class PublishDialog extends LitElement {
     @state() private accessor reasons: string[] = [];
     @state() private accessor publishedId = '';
     @state() private accessor publishedStatus = '';
+    @state() private accessor heldReason: string | null = null;
+    @state() private accessor secrets: SecretFinding[] = [];
 
     static styles = [shared, css`
         .panel { width: min(520px, calc(100vw - 32px)); }
@@ -193,28 +198,29 @@ export class PublishDialog extends LitElement {
         $publishOpen.set(false);
     }
 
-    private async submit(e: Event): Promise<void> {
+    private async submit(e: Event, confirmSecrets = false): Promise<void> {
         e.preventDefault();
         this.busy = true;
         this.error = '';
         this.reasons = [];
+        this.secrets = [];
         const tags = this.tags.split(/[,\s]+/).map(t => t.replace(/^#/, '').trim()).filter(Boolean);
-        const result = await publishCurrent({ title: this.listingTitle.trim(), description: this.description.trim(), tags, license: this.license });
+        const result = await publishCurrent({ title: this.listingTitle.trim(), description: this.description.trim(), tags, license: this.license, ...(confirmSecrets ? { confirmSecrets } : {}) });
         this.busy = false;
         if (result.ok) {
             this.publishedId = result.id;
             this.publishedStatus = result.status;
+            this.heldReason = result.heldReason;
         } else {
             this.error = result.error;
             this.reasons = result.reasons;
+            this.secrets = result.secrets;
         }
     }
 
     private async copyLink(): Promise<void> {
-        const url = new URL(window.location.origin + window.location.pathname);
-        url.searchParams.set('map', this.publishedId);
         try {
-            await navigator.clipboard.writeText(url.toString());
+            await navigator.clipboard.writeText(listingAddress(this.publishedId));
             toast('Link copied', 'success');
         } catch (e) {
             toast(`Copy failed: ${(e as Error).message}`, 'error');
@@ -233,7 +239,7 @@ export class PublishDialog extends LitElement {
                 ${this.publishedId ? html`<form @submit=${(e: Event) => e.preventDefault()}>
                     <p class="lead">${this.publishedStatus === 'listed'
                         ? 'It is in the directory now. Later changes stay private until you publish again.'
-                        : this.publishedStatus === 'pending' ? 'It is saved, and a person will review it before it appears.'
+                        : this.publishedStatus === 'pending' ? `It is saved, and a person will review it before it appears. ${this.heldReason ?? ''}`
                         : 'This listing was hidden after reports, so it stays hidden until it is reviewed.'}</p>
                     <div class="buttons">
                         <button type="button" @click=${() => this.copyLink()}>Copy link</button>
@@ -258,9 +264,10 @@ export class PublishDialog extends LitElement {
                     </label>
                     <details><summary>Preview the Markdown people and LLMs will read</summary>
                         <pre>${currentMarkdown(this.listingTitle).slice(0, 4000)}</pre></details>
-                    ${this.error ? html`<div class="error">${this.error}${this.reasons.length ? html`<ul>${this.reasons.map(r => html`<li>${r}</li>`)}</ul>` : nothing}</div>` : nothing}
+                    ${this.error ? html`<div class="error">${this.error}${this.reasons.length ? html`<ul>${this.reasons.map(r => html`<li>${r}</li>`)}</ul>` : nothing}${this.secrets.length ? html`<ul>${this.secrets.map(s => html`<li>${s.kind}, line ${s.line}</li>`)}</ul>` : nothing}</div>` : nothing}
                     <div class="buttons">
                         <button type="button" @click=${this.close}>Cancel</button>
+                        ${this.secrets.length ? html`<button type="button" ?disabled=${this.busy} @click=${(e: Event) => this.submit(e, true)}>Publish anyway</button>` : nothing}
                         <button type="submit" class="primary" ?disabled=${this.busy || !this.listingTitle.trim()}>${this.busy ? 'Publishing…' : 'Publish'}</button>
                     </div>
                 </form>`}
